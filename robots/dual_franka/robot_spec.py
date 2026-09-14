@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections.abc import Callable
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -123,6 +124,7 @@ def get_toolkit(
     mode: str = "evaluation",
     attempts_per_session: int = 0,
     state_output_dir: Path | str | None = None,
+    operator_input: Callable[[str, Callable[[], None]], str | None] | None = None,
 ):
     """Return the dual-Franka toolkit."""
     from robots.dual_franka.toolkit import DualFrankaToolkit
@@ -140,6 +142,7 @@ def get_toolkit(
         mode=mode,
         attempts_per_session=attempts_per_session,
         state_output_dir=state_output_dir,
+        operator_input=operator_input,
     )
 
 
@@ -206,7 +209,7 @@ def _parse_config(args: argparse.Namespace) -> RunConfig:
     if args.task_id is None:
         raise ValueError("--task-id is required")
     task = get_dual_franka_task(args.task_id)
-    explore = args.explore
+    explore = bool(getattr(args, "explore", False))
     timestamp = datetime.now().strftime("%Y%m%d-%H:%M:%S")
     output_dir = Path(
         args.output_dir
@@ -214,7 +217,7 @@ def _parse_config(args: argparse.Namespace) -> RunConfig:
     )
     memory_dir = (
         Path(args.memory_dir).expanduser().resolve()
-        if args.memory_dir
+        if getattr(args, "memory_dir", None)
         else get_memory_dir("dual_franka")
     )
     constraints = "\n".join(
@@ -224,6 +227,7 @@ def _parse_config(args: argparse.Namespace) -> RunConfig:
         recipe_tag=f"dual_franka_t{args.task_id}",
         output_dir=output_dir,
         prompt_vars={
+            "task_id": args.task_id,
             "task_name": task.name,
             "instruction": task.instruction,
             "setup": task.setup,
@@ -231,13 +235,15 @@ def _parse_config(args: argparse.Namespace) -> RunConfig:
             "constraints": constraints,
             "recipe_tag": f"dual_franka_t{args.task_id}",
             "mode": "explore" if explore else "eval",
-            "memory_profile": args.memory_profile,
+            "memory_profile": getattr(args, "memory_profile", None),
             "memory_dir": str(memory_dir),
             "memory_inbox": str(
                 memory_dir / "_internal" / "inbox" / f"dual_franka_t{args.task_id}"
             ),
             "session_number": 1,
-            "session_max": max(1, args.explore_sessions) if explore else 1,
+            "session_max": max(1, getattr(args, "explore_sessions", 1))
+            if explore
+            else 1,
         },
         task_desc={"task_id": args.task_id, "task_name": task.name},
     )
@@ -426,7 +432,9 @@ def _init_runtime(
     }
     connectors = {
         "env": lambda rpc: {
-            "env": DualFrankaEnvClient(rpc),
+            "env": DualFrankaEnvClient(
+                rpc, reset_on_connect=not getattr(args, "explore", False)
+            ),
             "task_description": get_dual_franka_task(args.task_id).instruction,
             "vla_instruction": get_dual_franka_task(args.task_id).vla_instruction,
         },

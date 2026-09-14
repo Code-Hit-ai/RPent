@@ -39,6 +39,14 @@ _HELP_TEXT = """Interactive commands:
     /help, /h, help, ? Show this help.
     /quit, /exit, /q   End interactive mode.
 
+Dual-Franka --explore controls:
+    /done             Confirm the pending scene reset.
+    /continue         Continue from a pending operator verdict.
+    /success          Finish successfully and save exploration memory.
+    /failure          Finish with a failure record.
+    /abort            Abort exploration without publishing success memory.
+    Words without / remain normal messages to the agent.
+
 At the first prompt, the built-in task is pre-filled — edit it and press Enter,
 submit it as-is, or clear it to type your own task.
 While the agent runs, type to steer it at the next turn.
@@ -150,6 +158,8 @@ def start_interactive_reader(
     input_queue: "queue.Queue[str | None]",
     *,
     first_prompt_default: str | None = None,
+    line_handler: Callable[[str], bool] | None = None,
+    on_close: Callable[[], None] | None = None,
 ) -> threading.Thread:
     """Start a prompt-toolkit input UI and forward submitted lines."""
     if not sys.stdin.isatty():
@@ -182,11 +192,15 @@ def start_interactive_reader(
                             break
                         if handle_local_command(line):
                             continue
+                        if line_handler is not None and line_handler(line):
+                            continue
                         input_queue.put(line)
                         pending_default = None
                         if line.strip().lower() in QUIT_TOKENS:
                             break
         finally:
+            if on_close is not None:
+                on_close()
             input_queue.put(None)
 
     thread = threading.Thread(target=_read, name="interactive-input", daemon=True)
