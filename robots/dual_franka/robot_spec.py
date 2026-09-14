@@ -19,13 +19,14 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections.abc import Callable
 from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from robots.dual_franka.prompt_bundle import system_prompt, user_prompt
-from robots.dual_franka.runtime_config import DUAL_FRANKA_CONFIG
+from robots.dual_franka.runtime_config import DEFAULT_CONFIG
 from robots.dual_franka.tasks import DUAL_FRANKA_TASKS, get_dual_franka_task
 from robots.franka.runtime_config import (
     DEFAULT_CALIBRATION_PATH,
@@ -55,7 +56,7 @@ DUAL_FRANKA_DASHBOARD_SPEC: DashboardSpec = {
                 "name": "task_id",
                 "kind": "integer",
                 "minimum": 0,
-                "suggestions": (0, 1),
+                "suggestions": tuple(sorted(DUAL_FRANKA_TASKS)),
             },
         ),
         "display": "Dual Franka task {task_id}",
@@ -64,6 +65,7 @@ DUAL_FRANKA_DASHBOARD_SPEC: DashboardSpec = {
     "runtime_components": (
         {"name": "env", "label": "DUAL FRANKA", "scope": "unique"},
         {"name": "vla", "label": "VLA", "scope": "shared"},
+        {"name": "sam3", "label": "SAM3", "scope": "shared"},
     ),
     "frame_channels": (
         {
@@ -81,13 +83,21 @@ DUAL_FRANKA_DASHBOARD_SPEC: DashboardSpec = {
             "label": "right wrist camera",
             "artifact": "right_wrist.png",
         },
+        {
+            "name": "d455",
+            "label": "D455 camera",
+            "legacy_path_key": "image_d455_path",
+        },
     ),
     "primitives": (
         "move_delta",
         "rotate_delta",
         "open_gripper",
         "close_gripper",
-        "vla_grasp",
+        "recover_joint_posture",
+        "vla_right_grasp",
+        "vla_handoff",
+        "vla_left_place",
     ),
 }
 
@@ -101,6 +111,7 @@ def get_robot_spec() -> RobotSpec:
         parse_config=_parse_config,
         init_runtime=_init_runtime,
         dashboard=DUAL_FRANKA_DASHBOARD_SPEC,
+        supports_exploration=True,
     )
 
 
@@ -109,17 +120,28 @@ def get_toolkit(
     primitives_kwargs: dict[str, Any],
     dashboard_events: DashboardEventSink,
     config: RunConfig,
+    mode: str = "evaluation",
+    attempts_per_session: int = 0,
+    state_output_dir: Path | str | None = None,
+    operator_input: Callable[[str, Callable[[], None]], str | None] | None = None,
 ):
     """Return the dual-Franka toolkit."""
     from robots.dual_franka.toolkit import DualFrankaToolkit
 
+    explore = mode == "exploration"
     memory = MemoryManager(
         root=config.prompt_vars.get("memory_dir") or get_memory_dir("dual_franka"),
+        memory_access="inbox_write" if explore else "read_only",
+        inbox_cell_tag=config.recipe_tag if explore else None,
     )
     return DualFrankaToolkit(
         primitives_kwargs=primitives_kwargs,
         dashboard_events=dashboard_events,
         memory=memory,
+        mode=mode,
+        attempts_per_session=attempts_per_session,
+        state_output_dir=state_output_dir,
+        operator_input=operator_input,
     )
 
 
@@ -130,8 +152,20 @@ def _add_cli_args(parser: argparse.ArgumentParser, use_dashboard: bool) -> None:
         default=None if use_dashboard else 0,
         choices=sorted(DUAL_FRANKA_TASKS),
     )
+    parser.add_argument(
+        "--instruction", default=None, help="Override the task instruction"
+    )
     parser.add_argument("--env-endpoint", default=None)
     parser.add_argument("--vla-endpoint", default=None)
+    parser.add_argument(
+        "--sam3-endpoint",
+        default=None,
+        help=(
+            "[protocol://]host:port of an existing SAM3 server "
+            "(protocol=http|socket, defaults to http). If unset, local SAM3 "
+            "auto-start is used only when SAM3_CHECKPOINT_PATH is set."
+        ),
+    )
     parser.add_argument("--robot-config", default=None)
     parser.add_argument(
         "--vla-model-path",
@@ -149,17 +183,44 @@ def _add_cli_args(parser: argparse.ArgumentParser, use_dashboard: bool) -> None:
         help="Path to hand_eye_calibration.json (defaults to easy_handeye's "
         "~/.ros/easy_handeye directory).",
     )
+    parser.add_argument(
+        "--auto-merge-memory",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Merge exploration output into layered memory. Disabled by default "
+            "for real-robot dual_franka so drafts are reviewed first."
+        ),
+    )
+    parser.add_argument(
+        "--explore-attempts-per-session",
+        type=int,
+        default=3,
+        help="Real-robot exploration attempts per planner session (default: 3).",
+    )
+    parser.add_argument(
+        "--explore-sessions",
+        type=int,
+        default=1,
+        help="Independent planner sessions per real-robot exploration run (default: 1).",
+    )
 
 
 def _parse_config(args: argparse.Namespace) -> RunConfig:
-    set_robot_config_path(args.robot_config or DUAL_FRANKA_CONFIG)
+    set_robot_config_path(args.robot_config or DEFAULT_CONFIG)
     if args.task_id is None:
         raise ValueError("--task-id is required")
     task = get_dual_franka_task(args.task_id)
+    explore = bool(getattr(args, "explore", False))
     timestamp = datetime.now().strftime("%Y%m%d-%H:%M:%S")
     output_dir = Path(
         args.output_dir
         or get_repo_root() / "logs" / f"{timestamp}_dual_franka_t{args.task_id}"
+    )
+    memory_dir = (
+        Path(args.memory_dir).expanduser().resolve()
+        if getattr(args, "memory_dir", None)
+        else get_memory_dir("dual_franka")
     )
     constraints = "\n".join(
         f"{index}. {constraint}" for index, constraint in enumerate(task.constraints, 1)
@@ -168,12 +229,31 @@ def _parse_config(args: argparse.Namespace) -> RunConfig:
         recipe_tag=f"dual_franka_t{args.task_id}",
         output_dir=output_dir,
         prompt_vars={
+            "task_id": args.task_id,
             "task_name": task.name,
-            "instruction": task.instruction,
+            "instruction": getattr(args, "instruction", None) or task.instruction,
+            "setup": getattr(task, "setup", ""),
             "success_criteria": task.success_criteria,
             "constraints": constraints,
+            "recipe_tag": f"dual_franka_t{args.task_id}",
+            "mode": "explore" if explore else "eval",
+            "memory_profile": getattr(args, "memory_profile", None),
+            "memory_dir": str(memory_dir),
+            "memory_inbox": str(
+                memory_dir / "_internal" / "inbox" / f"dual_franka_t{args.task_id}"
+            ),
+            "session_number": 1,
+            "session_max": max(1, getattr(args, "explore_sessions", 1))
+            if explore
+            else 1,
         },
         task_desc={"task_id": args.task_id, "task_name": task.name},
+    )
+
+
+def _cuda_args(args: argparse.Namespace) -> list[str]:
+    return (
+        ["--cuda-device", str(args.cuda_device)] if args.cuda_device is not None else []
     )
 
 
@@ -195,7 +275,9 @@ def _env_server_command(
         "--port",
         str(port),
         "--task-description",
-        task.instruction,
+        getattr(args, "instruction", None) or task.instruction,
+        "--calibration-path",
+        args.calibration_path,
         "--parent-watch",
     ]
     if args.robot_config:
@@ -226,7 +308,7 @@ def _vla_server_command(
         "--parent-watch",
     ]
     if args.cuda_device is not None:
-        command.extend(["--cuda-device", str(args.cuda_device)])
+        command.extend(_cuda_args(args))
     return command
 
 
@@ -278,6 +360,39 @@ def _spawn_vla_server(
     return daemon, HttpRpcClient(f"http://{host}:{port}")
 
 
+def _spawn_sam3_server(
+    args: argparse.Namespace,
+    output_dir: Path,
+) -> tuple[ProcessDaemon | None, RpcClient]:
+    """Spawn (or attach to) the shared SAM3 segmentation service."""
+    if args.sam3_endpoint is not None:
+        return None, make_rpc_client(args.sam3_endpoint)
+    if not os.environ.get("SAM3_CHECKPOINT_PATH"):
+        raise ValueError(
+            "dual-Franka SAM3 auto-start requires SAM3_CHECKPOINT_PATH, "
+            "or pass --sam3-endpoint to attach to an existing SAM3 server"
+        )
+    host, port = "127.0.0.1", pick_free_port()
+    daemon = ProcessDaemon(
+        name="sam3_server",
+        cmd=[
+            sys.executable,
+            str(get_repo_root() / "rpent" / "robots" / "components" / "sam3_server.py"),
+            "--transport",
+            "http",
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "--parent-watch",
+            *_cuda_args(args),
+        ],
+        log_path=str(output_dir / "sam3_server.log"),
+    )
+    daemon.start()
+    return daemon, HttpRpcClient(f"http://{host}:{port}")
+
+
 def _init_runtime(
     args: argparse.Namespace,
     output_dir: Path,
@@ -288,12 +403,13 @@ def _init_runtime(
 
     Each server can be spawned or attached-to independently: pass an endpoint
     to attach, or leave it unset to spawn a local subprocess. A VLA is only
-    started for the ``vla_grasp`` task (or an explicit ``--vla-endpoint``).
+    started for VLA-backed dual-Franka tasks (or an explicit ``--vla-endpoint``).
     """
     from robots.dual_franka.env_client import DualFrankaEnvClient
     from rpent.robots.components.pi05_vla_client import Pi05VLAClient
+    from rpent.robots.components.sam3_client import Sam3Client
 
-    available = {"env", "vla"}
+    available = {"env", "vla", "sam3"}
     selected = available if components is None else components
     unknown = selected.difference(available)
     if unknown:
@@ -301,20 +417,27 @@ def _init_runtime(
 
     needs_vla = args.vla_endpoint is not None
     if args.task_id is not None:
-        needs_vla = needs_vla or (
-            get_dual_franka_task(args.task_id).name == "vla_grasp"
-        )
+        task = get_dual_franka_task(args.task_id)
+        needs_vla = needs_vla or task.name.endswith("_vla") or args.task_id == 104
+    needs_sam3 = args.sam3_endpoint is not None or bool(
+        os.environ.get("SAM3_CHECKPOINT_PATH")
+    )
 
     starters = {
         "env": lambda: _spawn_env_server(args, output_dir),
         "vla": lambda: _spawn_vla_server(args, output_dir),
+        "sam3": lambda: _spawn_sam3_server(args, output_dir),
     }
     connectors = {
         "env": lambda rpc: {
-            "env": DualFrankaEnvClient(rpc),
-            "task_description": get_dual_franka_task(args.task_id).instruction,
+            "env": DualFrankaEnvClient(
+                rpc, reset_on_connect=not getattr(args, "explore", False)
+            ),
+            "task_description": getattr(args, "instruction", None)
+            or get_dual_franka_task(args.task_id).instruction,
         },
         "vla": lambda rpc: {"model": Pi05VLAClient(rpc, embodiment="dual_franka")},
+        "sam3": lambda rpc: {"sam3_client": Sam3Client(rpc)},
     }
 
     owned_daemons: dict[str, ProcessDaemon] = {}
@@ -324,12 +447,16 @@ def _init_runtime(
             continue
         if component == "vla" and not needs_vla:
             continue
+        if component == "sam3" and not needs_sam3:
+            continue
         pending[component] = try_spawn_server(
             owned_daemons, dashboard_events, component, starter
         )
 
     primitives_kwargs: dict[str, Any] = {}
-    for component, (daemon, rpc) in pending.items():
+    wait_order = ("env", "sam3", "vla")
+    for component in (name for name in wait_order if name in pending):
+        daemon, rpc = pending[component]
         component_kwargs = try_wait_server(
             owned_daemons,
             dashboard_events,
@@ -344,6 +471,9 @@ def _init_runtime(
     if "vla" in selected and not needs_vla:
         dashboard_events.emit(RuntimeStatusEvent("vla", "ready"))
         primitives_kwargs["model"] = None
+    if "sam3" in selected and not needs_sam3:
+        dashboard_events.emit(RuntimeStatusEvent("sam3", "ready"))
+        primitives_kwargs["sam3_client"] = None
 
     primitives_kwargs["calibration_path"] = args.calibration_path
 

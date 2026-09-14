@@ -79,6 +79,7 @@ def _capture_validated_args(
         return SimpleNamespace(
             add_cli_args=add_cli_args,
             parse_config=parse_config,
+            supports_exploration=name == "libero",
         )
 
     monkeypatch.setattr(
@@ -184,7 +185,7 @@ def test_robot_and_env_aliases_are_mutually_exclusive(
             ["--robot", "libero", "--dashboard", "--interactive"],
             "cannot be used together",
         ),
-        (["--robot", "robocasa", "--explore"], "supported only for LIBERO"),
+        (["--robot", "robocasa", "--explore"], "not supported for robot"),
         (
             ["--robot", "libero", "--explore", "--memory-profile", "hf"],
             "cannot be used with --memory-profile hf",
@@ -234,6 +235,7 @@ def test_shared_cli_validation_stops_before_robot_runtime(
             name=name,
             add_cli_args=add_cli_args,
             parse_config=parse_config,
+            supports_exploration=name == "libero",
         ),
     )
     monkeypatch.setattr(sys, "argv", ["rpent", *argv])
@@ -334,7 +336,12 @@ def test_handoff_message_lists_prior_attempts_deterministically(tmp_path: Path) 
     (attempts / "attempt_02_failed.json").write_text("{}")
     (attempts / "unrelated.json").write_text("{}")
 
-    message = cli._handoff_message(tmp_path, session_number=2, session_max=4)
+    message = cli._handoff_message(
+        tmp_path,
+        session_number=2,
+        session_max=4,
+        robot_name="libero",
+    )
 
     assert "agent 2 of up to 4" in message
     assert "2 attempt(s)" in message
@@ -458,6 +465,7 @@ def test_full_cli_exploration_finalizes_memory_without_starting_gpu_runtime(
         add_cli_args=add_cli_args,
         parse_config=parse_config,
         init_runtime=init_runtime,
+        supports_exploration=True,
     )
 
     def build_planner(*args: Any, **kwargs: Any) -> ScriptedPlanner:

@@ -80,6 +80,16 @@ class DualFrankaVLAFacade(BaseVLAFacade):
             repo_id,
         )
         self._model = get_openpi_model(cfg, torch_dtype=None).cuda().eval()
+        parameters = list(self._model.parameters())
+        self._status = {
+            "model_path": model_path,
+            "repo_id": repo_id,
+            "dtypes": sorted({str(p.dtype) for p in parameters}),
+            "device": str(parameters[0].device) if parameters else None,
+            "load_seconds": time.time() - started_at,
+            "config": OmegaConf.to_container(cfg, resolve=True),
+        }
+        self._rpc["vla.status"] = lambda: self._status
         logger.info("model ready in %.1fs", time.time() - started_at)
 
     def predict(self, obs: dict, options: dict | None = None) -> np.ndarray:

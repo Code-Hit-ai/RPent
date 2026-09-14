@@ -203,3 +203,125 @@ Keep operators at both emergency stops. Validate task ``0`` with very small
 single-arm motions before attempting a grasp. Stop when camera/state results
 disagree, when the requested motion is not reached, or when any calibration is
 uncertain.
+
+Attended exploration
+--------------------
+
+``dual_franka --explore`` supports the operator workflow from PR #176. It reuses
+RPent's exploration sessions and layered memory while retaining the existing
+real-robot RGB/depth/state logs. This does not enable single-arm ``franka``
+exploration.
+
+.. code-block:: bash
+
+   rpent --robot dual_franka --task-id 0 --explore --interactive \
+     --robot-config /path/to/robot.yaml \
+     --calibration-path /path/to/hand_eye_calibration.json \
+     --memory-dir /path/to/memory/dual_franka \
+     --explore-attempts-per-session 3 --explore-sessions 2 \
+     --output-dir /path/to/new-run
+
+Configure the planner and task-1 VLA as described above. The client skips its
+usual reset-on-connect during exploration; underlying hardware initialization
+still follows RLinf's own lifecycle. Every session must call
+``request_scene_reset`` before motion. The operator restores the physical scene
+and replies ``done``; only a successful robot reset with camera/state capture
+starts an attempt. Reset failures keep motion blocked.
+
+``request_operator_verdict`` records a fresh observation and asks for
+``success``, ``failure``, ``continue`` or ``abort``, with optional notes.
+``solved()`` uses the current operator verdict. Motion and ``continue`` clear
+previous verdicts. Abort/EOF permits ending without spending the remaining
+attempt budget.
+
+With ``--interactive``, reply using ``/operator <request-id> <answer>`` as shown
+in the terminal; other lines remain planner steering. Without it, answer the
+terminal prompt directly. A TTY is required. Dashboard operator feedback is not
+implemented, so Dashboard exploration is rejected before runtime startup.
+
+Each ``sessions/session_<NNN>/`` retains the existing artifacts plus per-step
+``exploration.json`` and session-level ``operator_events.json``. Failed attempts
+remain in the trace. Memory reads use ``suite`` and ``global``; working notes go
+into the task inbox's ``wip/``. After success, draft suite/global lessons in the
+inbox; the runner exports the winning attempt's command sequence and adds
+operator evidence to its task audit. Recorded coordinates are not automatically
+replayed. ``--auto-merge-memory`` is opt-in and invokes the existing memory
+merge/index workflow only on successful, error-free exploration runs, including
+the ``task_only`` audit/recipe pair.
+
+Prompts are selected by ``robots/dual_franka/prompt_bundle.py``. Evaluation uses
+``prompts/system.py`` and ``prompts/user.py``; exploration uses
+``prompts/explore.py``. ``tasks.py`` owns task instructions, success criteria and
+constraints; ``robot_spec.py`` supplies the rendering variables. Continuation
+system prompts retain the task context. The original LIBERO exploration prompt
+lives in ``robots/libero/prompts/explore.py``; its simulator reset/termination
+assumptions are not inherited by the real robot.
+
+External ``--env-endpoint`` servers must also be updated and advertise
+``explicit_reset_only=True``; older servers are rejected before client reset.
+Offline tests use fake hardware. Physical reset convergence, camera freshness
+and task judgment still require validation on the deployed robot.
+
+Direct interactive verdicts
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+With ``dual_franka --explore --interactive``, submit ``/success`` or ``/failure``
+on its own to finish exploration through program control. Bare ``success`` and
+``failure`` remain ordinary planner messages. Success requires a confirmed attempt;
+failure can also end the run before the initial reset. The first terminal verdict wins.
+The command never reaches the planner as chat. New tool calls are refused and
+active work is cancelled at its next supported boundary; an outstanding robot
+RPC or inference must return before finalization. A fresh observation backs the
+operator verdict. With ``/success``, the successful recipe/audit pair is published through the
+existing memory merger to ``task_only`` before exit, even without
+``--auto-merge-memory``. With ``/failure``, failure evidence stays in the run directory
+and no successful memory is published. Observation or persistence errors are reported as failures.
+Scene reset accepts ``/done`` or ``/operator <request-id> done``. Restart the running
+CLI after updating to enable this behavior.
+
+Other operator commands
+~~~~~~~~~~~~~~~~~~~~~~~
+
+* ``/done`` confirms only the currently pending scene-reset request.
+* ``/continue`` answers only the currently pending verdict request and resumes
+  the attempt without marking it successful or ending the session.
+* ``/abort`` cancels exploration at the supported boundary and exits, retaining
+  an abort record without publishing success memory. It does not require a working camera.
+
+Shortcuts without a matching pending request are refused, never buffered for a
+future request. All five bare words without ``/`` remain ordinary agent messages.
+The request-ID form ``/operator <request-id> <answer>`` remains supported.
+
+Direct commands do not invoke a separate global/suite memory synthesis stage.
+Existing planner errors remain errors and prevent automatic memory publication.
+
+Operator diagnostic consoles
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Task 103 runs explicit primitive commands without an Agent. Task 104 records
+VLA inference and optional execution through the existing environment/model RPCs.
+These consoles use the standard robot configuration, calibration and model flags;
+no local deployment section or JX runtime is required.
+
+.. code-block:: bash
+
+   python -m robots.dual_franka.manual --task-id 103 \
+     --robot-config /path/to/robot.yaml --calibration-path /path/to/calibration.json
+   python -m robots.dual_franka.vla_test --task-id 104 \
+     --robot-config /path/to/robot.yaml --calibration-path /path/to/calibration.json \
+     --vla-model-path /path/to/checkpoint --vla-repo-id org/dataset \
+     --instruction "Your policy task instruction"
+
+Manual commands include ``state``, ``cameras``, ``move right 0 0 0.01``,
+``rotate right 0 0 0.05``, ``open right``, ``close right``, ``reset`` and ``quit``.
+VLA commands include ``status``, ``prompt <instruction>``, ``infer`` (no motion),
+``step`` (fresh inference and execution), ``run N`` (1–20 chunks), ``reset`` and
+``quit``. Initialization may reset the robot. The diagnostic records predictions
+before execution and rejects malformed or out-of-workspace actions. An uncertain
+execution result blocks further execution until the session is restarted.
+
+The VLA server exposes read-only ``vla.status`` metadata without changing model
+precision. External VLA servers must implement this endpoint. Dual-Franka
+observations must include live ``states``; missing states are rejected instead
+of silently reusing a stale client cache. Records are JSON/NPZ artifacts in the
+run output directory; successful RPC execution is not a task-success judgment.
