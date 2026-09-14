@@ -263,7 +263,7 @@ Offline tests use fake hardware. Physical reset convergence, camera freshness
 and task judgment still require validation on the deployed robot.
 
 Direct interactive verdicts
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 With ``dual_franka --explore --interactive``, submit ``/success`` or ``/failure``
 on its own to finish exploration through program control. Bare ``success`` and
