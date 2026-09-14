@@ -305,7 +305,7 @@ def test_cli_two_sessions_operator_feedback_and_memory_pipeline(tmp_path, monkey
             assert "scope: global" in system_prompt
             if self.number == 2:
                 assert "not automatically reset" in user_message
-                assert "task_name:" in system_prompt
+                assert "task_name:" in user_message
                 assert "Original operator task instruction:" in user_message
             assert not toolkit._scene_ready
             assert "error" not in call(
@@ -635,3 +635,14 @@ def test_direct_abort_exits_even_when_camera_is_unavailable(setup):
     assert result["operator_verdict"] == "abort"
     assert not t.solved() and env.resets == 0
     assert t.write_recipe("dual_franka_t0") is None
+
+
+def test_explore_task_is_only_in_user_prompt():
+    from robots.dual_franka import prompt_bundle
+
+    variables = {"mode": "explore"}
+    system = prompt_bundle.system_prompt(variables)
+    user = prompt_bundle.user_prompt(variables)
+    for section in ("TASK", "TASK CONSTRAINTS"):
+        assert section not in system
+        assert section in user

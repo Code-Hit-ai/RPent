@@ -312,6 +312,12 @@ no local deployment section or JX runtime is required.
      --vla-model-path /path/to/checkpoint --vla-repo-id org/dataset \
      --instruction "Your policy task instruction"
 
+These are standalone module entry points; the shared ``rpent`` runner does not
+dispatch tasks 103/104 to diagnostic consoles. If ``--instruction`` is omitted,
+the VLA console uses the deployment task text in ``CLEAN_DESK_VLA_PROMPT``.
+Override it with ``--instruction`` or the console command ``prompt <instruction>``.
+Inference still requires an explicit ``infer``, ``step`` or ``run N`` command.
+
 Manual commands include ``state``, ``cameras``, ``move right 0 0 0.01``,
 ``rotate right 0 0 0.05``, ``open right``, ``close right``, ``reset`` and ``quit``.
 VLA commands include ``status``, ``prompt <instruction>``, ``infer`` (no motion),

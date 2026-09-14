@@ -153,14 +153,16 @@ def test_dual_client_uses_live_state_instead_of_cached_reset():
     np.testing.assert_array_equal(client.get_observation()["states"], np.ones(20))
 
 
+@pytest.mark.parametrize("instruction", [None, "diagnostic prompt"])
 def test_session_accepts_standard_config_without_local_deployment(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, instruction
 ):
     import argparse
 
     import yaml
 
     from robots.dual_franka import vla_test
+    from robots.dual_franka.tasks import CLEAN_DESK_VLA_PROMPT
 
     config_path = tmp_path / "robot.yaml"
     config_path.write_text(yaml.safe_dump({"workspace": {}}))
@@ -169,14 +171,12 @@ def test_session_accepts_standard_config_without_local_deployment(
     args = argparse.Namespace(
         robot_config=str(config_path),
         task_id=104,
-        instruction="diagnostic prompt",
+        instruction=instruction,
         vla_model_path="checkpoint",
         vla_repo_id="dataset",
     )
     model = SimpleNamespace(
-        _client=SimpleNamespace(
-            call=lambda *a, **kw: {"config": {"openpi": {"action_chunk": 20}}}
-        )
+        status=lambda **kw: {"config": {"openpi": {"action_chunk": 20}}}
     )
     spec = SimpleNamespace(
         parse_config=lambda args: SimpleNamespace(output_dir=tmp_path / "run"),
@@ -190,4 +190,18 @@ def test_session_accepts_standard_config_without_local_deployment(
         vla_test, "run_console", lambda session: observed.append(session.prompt)
     )
     assert vla_test.run_session(args) == 0
-    assert observed == ["diagnostic prompt"] and closed == [True]
+    assert observed == [instruction or CLEAN_DESK_VLA_PROMPT]
+    assert closed == [True]
+
+
+def test_vla_status_queries_metadata_without_inference():
+    from unittest.mock import Mock
+
+    from rpent.robots.components.pi05_vla_client import Pi05VLAClient
+
+    metadata = {"config": {"openpi": {"action_chunk": 20}}}
+    rpc = Mock()
+    rpc.call.return_value = metadata
+    client = Pi05VLAClient(rpc, embodiment="dual_franka")
+    assert client.status(timeout_s=5) == metadata
+    rpc.call.assert_called_once_with("vla.status", timeout_s=5)

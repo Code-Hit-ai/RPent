@@ -353,15 +353,6 @@ def main() -> int:
     )
     args = parser.parse_args()
     args.robot_name = early.robot_name
-    if args.robot_name == "dual_franka" and getattr(args, "task_id", None) == 104:
-        from robots.dual_franka.vla_test import run_session
-
-        return run_session(args)
-    if args.robot_name == "dual_franka" and getattr(args, "task_id", None) == 103:
-        from robots.dual_franka.manual import run_session
-
-        return run_session(args)
-
     if args.dashboard and args.interactive:
         parser.error("--dashboard and --interactive cannot be used together")
     if args.base_url and args.planner in BASE_URL_ENV_BY_PLANNER:

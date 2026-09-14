@@ -19,7 +19,6 @@ inherit LIBERO's reset, simulator termination, or benchmark-solvability rules.
 """
 
 from robots.dual_franka.prompts import system as base
-from robots.dual_franka.prompts import user
 from rpent.prompt.utils import Numbered
 
 MODE = """MULTI-ATTEMPT REAL-ROBOT EXPLORATION. You are session {{session_number}}
@@ -117,8 +116,6 @@ def system_prompt():
     return {
         "ROLE": base.ROLE,
         "EXPLORATION MODE": MODE,
-        "TASK": user.TASK,
-        "TASK CONSTRAINTS": user.CONSTRAINTS,
         "RUNTIME": base.RUNTIME,
         "SAFETY RULES": Numbered(base.RULES),
         "CAMERA AND PROJECTION RULES": Numbered(base.CAMERA_AND_PROJECTION),

@@ -321,6 +321,12 @@ deployment 配置或 JX 运行时。
      --vla-model-path /path/to/checkpoint --vla-repo-id org/dataset \
      --instruction "完整策略任务指令"
 
+这两个控制台使用独立模块入口；共享 ``rpent`` runner 不再将任务 103/104
+分发到诊断控制台。未提供 ``--instruction`` 时，VLA 控制台使用
+``CLEAN_DESK_VLA_PROMPT`` 中的部署任务文字，可通过 ``--instruction`` 或
+控制台的 ``prompt <指令>`` 覆盖。仍需显式输入 ``infer``、``step`` 或
+``run N`` 才触发推理。
+
 手动命令包括 ``state``、``cameras``、``move right 0 0 0.01``、
 ``rotate right 0 0 0.05``、``open right``、``close right``、``reset``、``quit``。
 VLA 命令包括 ``status``、``prompt <指令>``、``infer``（仅推理）、

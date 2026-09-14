@@ -237,13 +237,11 @@ def run_session(args: argparse.Namespace) -> int:
     """Own the diagnostic runtime and close it when the console exits."""
     spec = get_robot_spec()
     from robots.dual_franka.runtime_config import DEFAULT_CONFIG
-    from robots.dual_franka.tasks import get_dual_franka_task
+    from robots.dual_franka.tasks import CLEAN_DESK_VLA_PROMPT
 
     args.robot_config = args.robot_config or str(DEFAULT_CONFIG)
     data = yaml.safe_load(Path(args.robot_config).read_text())
-    args.instruction = (
-        args.instruction or get_dual_franka_task(args.task_id).instruction
-    )
+    args.instruction = args.instruction or CLEAN_DESK_VLA_PROMPT
     config = spec.parse_config(args)
     output = init_output_dir(config.output_dir)
     daemons = []
@@ -255,7 +253,7 @@ def run_session(args: argparse.Namespace) -> int:
             args, output, NullDashboardEventSink(), None
         )
         model = kwargs["model"]
-        status = model._client.call("vla.status", timeout_s=10)
+        status = model.status(timeout_s=10)
         save_record(
             output / "deployment",
             {
