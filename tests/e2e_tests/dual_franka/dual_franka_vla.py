@@ -103,15 +103,17 @@ class DeploymentTest:
         output: Path,
         workspace: dict[str, Any],
         prompt: str,
-        status: dict[str, Any],
+        expected_steps: int,
     ) -> None:
         self.env, self.model = env, model
         self.output, self.workspace = Path(output), workspace
-        self.prompt, self.status = prompt, status
+        self.prompt = prompt
         self.index = 0
         self.execution_uncertain = False
         self.episode_done = False
-        self.expected_steps = int(status["config"]["openpi"]["action_chunk"])
+        if expected_steps <= 0:
+            raise ValueError("expected action steps must be positive")
+        self.expected_steps = expected_steps
 
     def chunk(self, execute: bool = False) -> dict[str, Any]:
         """Infer from fresh observations and optionally execute the prediction."""
@@ -179,7 +181,9 @@ def run_console(
     emit: Callable[[str], None] = print,
 ) -> None:
     """Read explicit commands without invoking an Agent."""
-    help_text = "status | prompt <instruction> | infer | step | run N (1..20 chunks) | reset | quit"
+    help_text = (
+        "prompt <instruction> | infer | step | run N (1..20 chunks) | reset | quit"
+    )
     emit(help_text)
     emit("infer 不下发预测动作；step 执行一个动作块。Ctrl-C 退出会话，不等同硬件急停。")
     while True:
@@ -195,12 +199,6 @@ def run_console(
                     raise ValueError("prompt cannot be empty")
                 session.prompt = arg.strip()
                 emit("Prompt: " + session.prompt)
-            elif command == "status" and not arg:
-                emit(
-                    json.dumps(
-                        dict(session.status, prompt=session.prompt), ensure_ascii=False
-                    )
-                )
             elif command == "help" and not arg:
                 emit(help_text)
             elif command == "reset" and not arg:
@@ -235,6 +233,8 @@ def run_console(
 
 def run_session(args: argparse.Namespace) -> int:
     """Own the diagnostic runtime and close it when the console exits."""
+    if args.expected_action_steps <= 0:
+        raise ValueError("expected action steps must be positive")
     spec = get_robot_spec()
     from robots.dual_franka.runtime_config import DEFAULT_CONFIG
     from robots.dual_franka.tasks import get_dual_franka_task
@@ -261,17 +261,21 @@ def run_session(args: argparse.Namespace) -> int:
             args, output, NullDashboardEventSink(), {"env", "vla"}
         )
         model = kwargs["model"]
-        status = model.status(timeout_s=10)
         save_record(
             output / "deployment",
             {
-                "server": status,
+                "expected_action_steps": args.expected_action_steps,
                 "robot_config": data,
                 "camera_meta": kwargs["env"].get_camera_meta(),
             },
         )
         session = DeploymentTest(
-            kwargs["env"], model, output, data["workspace"], args.instruction, status
+            kwargs["env"],
+            model,
+            output,
+            data["workspace"],
+            args.instruction,
+            args.expected_action_steps,
         )
         logger.info("Records: %s", output)
         run_console(session)
@@ -290,6 +294,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--instruction",
         default=None,
         help="Policy instruction override; defaults to the selected task VLA instruction",
+    )
+    parser.add_argument(
+        "--expected-action-steps",
+        type=int,
+        default=20,
+        help="Expected prediction chunk length for action validation (default: 20)",
     )
     parser.add_argument("--output-dir", default=None)
     return parser

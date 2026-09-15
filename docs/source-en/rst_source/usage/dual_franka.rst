@@ -159,14 +159,15 @@ Download it, point ``PI05_CHECKPOINT_PATH`` at the downloaded directory, and set
 	(collect GELLO demos, convert to tcp_rot6d, run SFT, then deploy).
 
 When ``--vla-endpoint`` is absent, RPent starts
-``robots/dual_franka/vla_server.py`` and loads
+``rpent/robots/components/pi05_vla_server.py`` and loads
 ``pi05_dualfranka_tcp_rot6d`` once.
 
 To run the VLA service separately:
 
 .. code-block:: bash
 
-	uv run --extra franka python -m robots.dual_franka.vla_server \
+	uv run --extra franka python -m rpent.robots.components.pi05_vla_server \
+	  --embodiment dual_franka \
 	  --model-path /path/to/checkpoints/global_step_N \
 	  --repo-id org/dual-franka-tcp-rot6d \
 	  --cuda-device 0 --transport http --host 0.0.0.0 --port 6000
@@ -364,14 +365,15 @@ the environment and VLA components; configured SAM3 services are not started or 
 
 .. code-block:: bash
 
-   python -m tests.manual.dual_franka_vla --task-id 1 \
+   python -m tests.e2e_tests.dual_franka.dual_franka_vla --task-id 1 \
      --robot-config /path/to/robot.yaml --calibration-path /path/to/calibration.json \
      --vla-model-path /path/to/checkpoint --vla-repo-id org/dataset
 
-Commands: ``status``, ``prompt <instruction>``, ``infer`` (no execution), ``step``
+Commands: ``prompt <instruction>``, ``infer`` (no execution), ``step``
 (fresh prediction and execution), ``run N`` (1–20 chunks), ``reset``, ``quit``.
 Initialization may reset the robot. Inputs and predictions are saved before
 execution as JSON/NPZ. Invalid observations/actions are rejected; uncertain
 execution blocks further motion until restart. RPC success is not task success.
-External model servers must expose ``vla.status``, queried through the public
-client API. Model precision and main's configured policy execution stay unchanged.
+Action validation expects 20 steps per prediction chunk. For a checkpoint with a
+different chunk length, set ``--expected-action-steps`` explicitly to match it.
+External model servers use the standard VLA prediction and health-check RPCs.

@@ -291,7 +291,9 @@ def _vla_server_command(
     command = [
         sys.executable,
         "-m",
-        "robots.dual_franka.vla_server",
+        "rpent.robots.components.pi05_vla_server",
+        "--embodiment",
+        "dual_franka",
         "--transport",
         "http",
         "--host",

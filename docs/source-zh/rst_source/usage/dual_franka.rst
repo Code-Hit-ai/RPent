@@ -148,14 +148,15 @@ ModelScope 上发布了一个可直接使用的 task ``1`` checkpoint：
 	（采集 GELLO 示教数据、转换为 tcp_rot6d、运行 SFT，然后部署）。
 
 未设置 ``--vla-endpoint`` 时，RPent 会启动
-``robots/dual_franka/vla_server.py``，并只加载一次
+``rpent/robots/components/pi05_vla_server.py``，并只加载一次
 ``pi05_dualfranka_tcp_rot6d``。
 
 也可以单独启动 VLA 服务：
 
 .. code-block:: bash
 
-	uv run --extra franka python -m robots.dual_franka.vla_server \
+	uv run --extra franka python -m rpent.robots.components.pi05_vla_server \
+	  --embodiment dual_franka \
 	  --model-path /path/to/checkpoints/global_step_N \
 	  --repo-id org/dual-franka-tcp-rot6d \
 	  --cuda-device 0 --transport http --host 0.0.0.0 --port 6000
@@ -365,12 +366,13 @@ base、可用的 D455 图像/深度和相机元数据。复位不清空前一次
 
 .. code-block:: bash
 
-   python -m tests.manual.dual_franka_vla --task-id 1 \
+   python -m tests.e2e_tests.dual_franka.dual_franka_vla --task-id 1 \
      --robot-config /path/to/robot.yaml --calibration-path /path/to/calibration.json \
      --vla-model-path /path/to/checkpoint --vla-repo-id org/dataset
 
-支持 ``status``、``prompt <指令>``、``infer``（不执行）、``step``（重新推理并执行）、
+支持 ``prompt <指令>``、``infer``（不执行）、``step``（重新推理并执行）、
 ``run N``（1–20 块）、``reset``、``quit``。初始化可能复位。执行前将输入与预测保存为
 JSON/NPZ，拒绝无效观测或动作；执行结果不确定时禁止继续运动，需重启会话。
-RPC 成功不代表任务成功。外部模型服务需要支持 ``vla.status``，通过公开客户端
-接口查询；保留 main 的模型精度与配置化策略执行。
+RPC 成功不代表任务成功。动作校验默认要求每块预测包含 20 步；如果 checkpoint
+使用不同块长度，请通过 ``--expected-action-steps`` 显式指定匹配的值。
+外部模型服务使用标准 VLA 推理和健康检查 RPC。

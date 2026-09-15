@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from tests.manual.dual_franka_vla import DeploymentTest, run_console
+from tests.e2e_tests.dual_franka.dual_franka_vla import DeploymentTest, run_console
 
 
 def make_session(tmp_path, *, fail=False, terminate=False):
@@ -62,7 +62,7 @@ def make_session(tmp_path, *, fail=False, terminate=False):
         tmp_path,
         workspace,
         "pick",
-        {"config": {"openpi": {"action_chunk": 20}}},
+        20,
     )
     return s, calls, actions
 
@@ -164,22 +164,21 @@ def test_session_accepts_standard_config_without_local_deployment(
     import yaml
 
     from robots.dual_franka.tasks import get_dual_franka_task
-    from tests.manual import dual_franka_vla as vla_test
+    from tests.e2e_tests.dual_franka import dual_franka_vla as vla_test
 
     config_path = tmp_path / "robot.yaml"
     config_path.write_text(yaml.safe_dump({"workspace": {}}))
     closed = []
     observed = []
     args = argparse.Namespace(
+        expected_action_steps=20,
         robot_config=str(config_path),
         task_id=1,
         instruction=instruction,
         vla_model_path="checkpoint",
         vla_repo_id="dataset",
     )
-    model = SimpleNamespace(
-        status=lambda **kw: {"config": {"openpi": {"action_chunk": 20}}}
-    )
+    model = SimpleNamespace()
 
     def init_runtime(args, output, events, components):
         assert components == {"env", "vla"}
@@ -201,27 +200,15 @@ def test_session_accepts_standard_config_without_local_deployment(
     assert closed == [True]
 
 
-def test_vla_status_queries_metadata_without_inference():
-    from unittest.mock import Mock
-
-    from rpent.robots.components.pi05_vla_client import Pi05VLAClient
-
-    metadata = {"config": {"openpi": {"action_chunk": 20}}}
-    rpc = Mock()
-    rpc.call.return_value = metadata
-    client = Pi05VLAClient(rpc, embodiment="dual_franka")
-    assert client.status(timeout_s=5) == metadata
-    rpc.call.assert_called_once_with("vla.status", timeout_s=5)
-
-
 def test_primitive_profile_is_rejected_before_runtime(tmp_path, monkeypatch):
     import argparse
 
-    from tests.manual import dual_franka_vla as vla_test
+    from tests.e2e_tests.dual_franka import dual_franka_vla as vla_test
 
     config = tmp_path / "config.yaml"
     config.write_text("workspace: {}\n")
     args = argparse.Namespace(
+        expected_action_steps=20,
         task_id=0,
         instruction="explicit prompt",
         robot_config=str(config),
@@ -240,7 +227,7 @@ def test_primitive_profile_is_rejected_before_runtime(tmp_path, monkeypatch):
 
 def test_diagnostic_parser_provides_shared_config_defaults(tmp_path):
     from robots.dual_franka.robot_spec import get_robot_spec
-    from tests.manual.dual_franka_vla import build_parser
+    from tests.e2e_tests.dual_franka.dual_franka_vla import build_parser
 
     args = build_parser().parse_args(["--output-dir", str(tmp_path)])
     assert args.explore is False
@@ -252,7 +239,7 @@ def test_diagnostic_parser_provides_shared_config_defaults(tmp_path):
 
 def test_diagnostic_runtime_ignores_configured_sam3(monkeypatch, tmp_path):
     from robots.dual_franka import robot_spec
-    from tests.manual.dual_franka_vla import build_parser
+    from tests.e2e_tests.dual_franka.dual_franka_vla import build_parser
 
     monkeypatch.setenv("SAM3_CHECKPOINT_PATH", "/unused/checkpoint")
     args = build_parser().parse_args(["--sam3-endpoint", "http://unused:9999"])
@@ -273,45 +260,51 @@ def test_diagnostic_runtime_ignores_configured_sam3(monkeypatch, tmp_path):
     assert started == ["env", "vla"] and waited == ["env", "vla"]
 
 
-def test_dual_vla_status_and_prediction_follow_component_rpc_contract(monkeypatch):
-    import sys
-    from types import ModuleType
+@pytest.mark.parametrize("steps", [0, -1])
+def test_invalid_chunk_length_rejected_before_runtime(monkeypatch, steps):
+    from tests.e2e_tests.dual_franka import dual_franka_vla
 
-    import torch
+    monkeypatch.setattr(
+        dual_franka_vla,
+        "get_robot_spec",
+        lambda: pytest.fail("must reject before initializing runtime"),
+    )
+    with pytest.raises(ValueError, match="must be positive"):
+        dual_franka_vla.run_session(SimpleNamespace(expected_action_steps=steps))
 
-    from robots.dual_franka.vla_server import DualFrankaVLAFacade
 
-    calls = []
+def test_configured_chunk_length_is_checked_before_execution(tmp_path):
+    session, calls, actions = make_session(tmp_path)
+    session.expected_steps = 5
+    with pytest.raises(ValueError, match="Expected finite actions"):
+        session.chunk(execute=True)
+    assert "execute" not in calls
+    session.model.predict = lambda *args, **kwargs: actions[:5]
+    assert session.chunk(execute=True)["actions"] == 5
+    assert calls.count("execute") == 1
 
-    class Model:
-        def cuda(self):
-            return self
 
-        def eval(self):
-            return self
+def test_dual_franka_spawns_shared_vla_server():
+    from robots.dual_franka.robot_spec import _vla_server_command
+    from tests.e2e_tests.dual_franka.dual_franka_vla import build_parser
 
-        def parameters(self):
-            return iter([torch.zeros(1)])
-
-        def predict_action_batch(self, obs, mode):
-            calls.append(mode)
-            return torch.ones((20, 20)), None
-
-    def get_model(cfg, torch_dtype):
-        assert cfg.action_dim == 20 and cfg.openpi.num_images_in_input == 3
-        assert cfg.openpi_data.repo_id == "test/dataset"
-        return Model()
-
-    loader = ModuleType("rlinf.models.embodiment.openpi")
-    loader.get_model = get_model
-    monkeypatch.setitem(sys.modules, loader.__name__, loader)
-    facade = DualFrankaVLAFacade("/unused/checkpoint", "test/dataset")
-    try:
-        status = facade._dispatch("vla.status", (), {})
-        assert status["config"]["openpi"]["action_chunk"] == 20
-        assert calls == []
-        actions = facade._dispatch("vla.predict", ({},), {"options": {"mode": "eval"}})
-        assert actions.shape == (20, 20) and actions.dtype == np.float32
-        assert calls == ["eval"]
-    finally:
-        facade.close()
+    args = build_parser().parse_args(
+        [
+            "--vla-model-path",
+            "/checkpoint",
+            "--vla-repo-id",
+            "test/data",
+            "--cuda-device",
+            "2",
+        ]
+    )
+    command = _vla_server_command(args, host="127.0.0.1", port=6000)
+    assert command[1:5] == [
+        "-m",
+        "rpent.robots.components.pi05_vla_server",
+        "--embodiment",
+        "dual_franka",
+    ]
+    assert command[command.index("--repo-id") + 1] == "test/data"
+    assert command[command.index("--model-path") + 1] == "/checkpoint"
+    assert command[command.index("--cuda-device") + 1] == "2"
