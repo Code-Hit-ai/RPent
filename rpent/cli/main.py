@@ -322,7 +322,7 @@ def _start_continuation_session(
         session_max,
         robot_name=args.robot_name,
     )
-    if args.robot_name == "dual_franka" and prompt_vars.get("initial_user_message"):
+    if prompt_vars.get("initial_user_message"):
         session_message += "\n\nOriginal operator task instruction:\n" + str(
             prompt_vars["initial_user_message"]
         )
@@ -356,11 +356,12 @@ def main() -> int:
     )
     args = parser.parse_args()
     args.robot_name = early.robot_name
+    human_interactive_exploration = (
+        args.explore and robot_spec.supports_human_interactive_exploration
+    )
     if args.dashboard and args.interactive:
         parser.error("--dashboard and --interactive cannot be used together")
-    if robot_spec.is_real_robot and not (
-        args.explore and args.robot_name == "dual_franka"
-    ):
+    if robot_spec.is_real_robot and not human_interactive_exploration:
         if args.dashboard or args.interactive:
             parser.error(
                 "This robot requires exclusive terminal input for operator confirmation; "
@@ -386,14 +387,14 @@ def main() -> int:
         )
     if args.explore and getattr(args, "explore_attempts_per_session", 0) < 0:
         parser.error("--explore-attempts-per-session must be nonnegative")
-    if args.explore and args.robot_name == "dual_franka":
+    if human_interactive_exploration:
         if args.dashboard:
             parser.error(
-                "dual_franka exploration currently requires the CLI operator terminal; Dashboard feedback is not implemented"
+                "Human-interactive exploration currently requires the CLI operator terminal; Dashboard feedback is not implemented"
             )
         if sys.stdin is None or not sys.stdin.isatty():
             parser.error(
-                "dual_franka exploration requires a TTY for operator reset/verdict feedback"
+                "Human-interactive exploration requires a TTY for operator reset/verdict feedback"
             )
     if args.explore and args.memory_profile == "hf":
         parser.error("--explore cannot be used with --memory-profile hf")
@@ -459,10 +460,10 @@ def main() -> int:
     )
 
     operator_input = None
-    if args.explore and robot_name == "dual_franka":
-        from rpent.cli.operator_input import OperatorInput
+    if human_interactive_exploration:
+        from rpent.tools.human_in_the_loop import HumanInTheLoopInput
 
-        operator_input = OperatorInput(interactive=args.interactive)
+        operator_input = HumanInTheLoopInput(interactive=args.interactive)
     input_queue: "queue.Queue[str | None] | None" = None
     await_first_prompt: "Callable[[], str | None] | None" = None
     if args.interactive:
@@ -475,6 +476,7 @@ def main() -> int:
             **(
                 {
                     "line_handler": operator_input.route_line,
+                    "extra_help": operator_input.help_text,
                     "on_close": operator_input.close,
                 }
                 if operator_input is not None
@@ -509,7 +511,7 @@ def main() -> int:
         first_user_msg = await_first_prompt()
         if first_user_msg is None:
             logger.info("no task entered; ending session before start.")
-    if args.explore and robot_name == "dual_franka":
+    if human_interactive_exploration:
         prompt_vars = {**prompt_vars, "initial_user_message": first_user_msg}
     # Exploration may hand off between independent planner contexts.
     sessions = max(1, int(getattr(args, "explore_sessions", 1) or 1))
@@ -710,7 +712,7 @@ def main() -> int:
         and (getattr(args, "auto_merge_memory", False) or direct_operator_success)
         and not agent_error
         and memory_manager is not None
-        and (robot_name != "dual_franka" or solved)
+        and (not human_interactive_exploration or solved)
     ):
         try:
             merge_result = memory_manager.merge_memory(

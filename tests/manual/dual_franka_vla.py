@@ -258,7 +258,7 @@ def run_session(args: argparse.Namespace) -> int:
     )
     try:
         daemons, kwargs = spec.init_runtime(
-            args, output, NullDashboardEventSink(), None
+            args, output, NullDashboardEventSink(), {"env", "vla"}
         )
         model = kwargs["model"]
         status = model.status(timeout_s=10)
@@ -281,19 +281,23 @@ def run_session(args: argparse.Namespace) -> int:
     return 0
 
 
-def main() -> int:
-    """Run the diagnostic command-line entry point."""
+def build_parser() -> argparse.ArgumentParser:
+    """Build a standalone diagnostic parser with the complete config contract."""
     parser = argparse.ArgumentParser(description=__doc__)
     get_robot_spec().add_cli_args(parser, use_dashboard=False)
-    parser.set_defaults(task_id=1)
+    parser.set_defaults(task_id=1, explore=False, memory_dir=None, memory_profile=None)
     parser.add_argument(
         "--instruction",
         default=None,
         help="Policy instruction override; defaults to the selected task VLA instruction",
     )
     parser.add_argument("--output-dir", default=None)
-    args = parser.parse_args()
-    return run_session(args)
+    return parser
+
+
+def main() -> int:
+    """Run the diagnostic command-line entry point."""
+    return run_session(build_parser().parse_args())
 
 
 if __name__ == "__main__":

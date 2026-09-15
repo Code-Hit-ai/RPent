@@ -25,15 +25,25 @@ from collections.abc import Callable
 
 from rpent.utils.logging import get_logger
 
-logger = get_logger("operator_input")
+logger = get_logger("human_in_the_loop")
 
 
-class OperatorInput:
+class HumanInTheLoopInput:
     """Use the existing interactive reader, or read an otherwise unowned TTY.
 
     Interactive replies include a request ID so old steering messages and late
     confirmations cannot authorize a different reset. No robot code reads stdin.
     """
+
+    help_text = """Human-interactive exploration commands:
+    /done             Confirm the pending scene reset.
+    /continue         Continue from a pending operator verdict.
+    /success          Finish successfully and save exploration memory.
+    /failure          Finish with a failure record.
+    /abort            Abort exploration without publishing success memory.
+    Words without / remain normal messages to the agent.
+
+"""
 
     def __init__(self, *, interactive: bool) -> None:
         self.interactive = interactive

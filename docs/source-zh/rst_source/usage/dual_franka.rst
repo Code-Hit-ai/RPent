@@ -240,9 +240,13 @@ API 部署需显式设置 ``RPENT_CODEX_API_KEY`` 和可选的
 探索模式（人工复位与判定）
 --------------------------
 
-``dual_franka`` 支持基于 PR #176 操作员接口的 ``--explore``。使用原来的真机
+``dual_franka --explore`` 在操作员确认场景准备完成后复位机器人，
+并记录人工判定及观测证据。使用原来的真机
 状态和相机日志，通过已有的探索循环执行多次尝试、跨 session 交接及 memory 整理。
 单臂 ``franka`` 尚未开放该模式。
+
+机器人通过 ``RobotSpec.supports_human_interactive_exploration`` 声明支持人工交互式探索。
+只有在探索模式中启用该能力时，交互帮助才会显示五个人工指令。
 
 在已配置好的机器人运行环境中启动，例如使用任务 0：
 
@@ -356,10 +360,12 @@ base、可用的 D455 图像/深度和相机元数据。复位不清空前一次
 原语测试复用 ``robots/dual_franka/run_manual_skill.sh``，VLA 诊断使用独立入口。
 不注册 task103/104，也不经过共享 runner 分发。``--task-id`` 选择已有 VLA 任务
 配置（默认 1），指令来自其 ``vla_instruction``，可用 ``--instruction`` 覆盖。
+请在源码仓库中运行以下命令。诊断只初始化环境和 VLA 组件，
+即使配置了 SAM3，也不会启动或连接其服务。
 
 .. code-block:: bash
 
-   python -m robots.dual_franka.vla_test --task-id 1 \
+   python -m tests.manual.dual_franka_vla --task-id 1 \
      --robot-config /path/to/robot.yaml --calibration-path /path/to/calibration.json \
      --vla-model-path /path/to/checkpoint --vla-repo-id org/dataset
 

@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from robots.dual_franka.vla_test import DeploymentTest, run_console
+from tests.manual.dual_franka_vla import DeploymentTest, run_console
 
 
 def make_session(tmp_path, *, fail=False, terminate=False):
@@ -163,8 +163,8 @@ def test_session_accepts_standard_config_without_local_deployment(
 
     import yaml
 
-    from robots.dual_franka import vla_test
     from robots.dual_franka.tasks import get_dual_franka_task
+    from tests.manual import dual_franka_vla as vla_test
 
     config_path = tmp_path / "robot.yaml"
     config_path.write_text(yaml.safe_dump({"workspace": {}}))
@@ -180,12 +180,17 @@ def test_session_accepts_standard_config_without_local_deployment(
     model = SimpleNamespace(
         status=lambda **kw: {"config": {"openpi": {"action_chunk": 20}}}
     )
-    spec = SimpleNamespace(
-        parse_config=lambda args: SimpleNamespace(output_dir=tmp_path / "run"),
-        init_runtime=lambda *a: (
+
+    def init_runtime(args, output, events, components):
+        assert components == {"env", "vla"}
+        return (
             [SimpleNamespace(stop=lambda: closed.append(True))],
             {"model": model, "env": SimpleNamespace(get_camera_meta=lambda: {})},
-        ),
+        )
+
+    spec = SimpleNamespace(
+        parse_config=lambda args: SimpleNamespace(output_dir=tmp_path / "run"),
+        init_runtime=init_runtime,
     )
     monkeypatch.setattr(vla_test, "get_robot_spec", lambda: spec)
     monkeypatch.setattr(
@@ -212,7 +217,7 @@ def test_vla_status_queries_metadata_without_inference():
 def test_primitive_profile_is_rejected_before_runtime(tmp_path, monkeypatch):
     import argparse
 
-    from robots.dual_franka import vla_test
+    from tests.manual import dual_franka_vla as vla_test
 
     config = tmp_path / "config.yaml"
     config.write_text("workspace: {}\n")
@@ -231,3 +236,82 @@ def test_primitive_profile_is_rejected_before_runtime(tmp_path, monkeypatch):
     )
     with pytest.raises(ValueError, match="VLA task profile"):
         vla_test.run_session(args)
+
+
+def test_diagnostic_parser_provides_shared_config_defaults(tmp_path):
+    from robots.dual_franka.robot_spec import get_robot_spec
+    from tests.manual.dual_franka_vla import build_parser
+
+    args = build_parser().parse_args(["--output-dir", str(tmp_path)])
+    assert args.explore is False
+    assert args.memory_dir is None and args.memory_profile is None
+    config = get_robot_spec().parse_config(args)
+    assert config.prompt_vars["mode"] == "eval"
+    assert config.prompt_vars["session_max"] == 1
+
+
+def test_diagnostic_runtime_ignores_configured_sam3(monkeypatch, tmp_path):
+    from robots.dual_franka import robot_spec
+    from tests.manual.dual_franka_vla import build_parser
+
+    monkeypatch.setenv("SAM3_CHECKPOINT_PATH", "/unused/checkpoint")
+    args = build_parser().parse_args(["--sam3-endpoint", "http://unused:9999"])
+    started, waited = [], []
+    monkeypatch.setattr(
+        robot_spec,
+        "try_spawn_server",
+        lambda owned, events, name, fn: started.append(name) or (None, object()),
+    )
+    monkeypatch.setattr(
+        robot_spec,
+        "try_wait_server",
+        lambda owned, events, name, *args, **kwargs: waited.append(name) or {},
+    )
+    robot_spec._init_runtime(
+        args, tmp_path, SimpleNamespace(emit=lambda event: None), {"env", "vla"}
+    )
+    assert started == ["env", "vla"] and waited == ["env", "vla"]
+
+
+def test_dual_vla_status_and_prediction_follow_component_rpc_contract(monkeypatch):
+    import sys
+    from types import ModuleType
+
+    import torch
+
+    from robots.dual_franka.vla_server import DualFrankaVLAFacade
+
+    calls = []
+
+    class Model:
+        def cuda(self):
+            return self
+
+        def eval(self):
+            return self
+
+        def parameters(self):
+            return iter([torch.zeros(1)])
+
+        def predict_action_batch(self, obs, mode):
+            calls.append(mode)
+            return torch.ones((20, 20)), None
+
+    def get_model(cfg, torch_dtype):
+        assert cfg.action_dim == 20 and cfg.openpi.num_images_in_input == 3
+        assert cfg.openpi_data.repo_id == "test/dataset"
+        return Model()
+
+    loader = ModuleType("rlinf.models.embodiment.openpi")
+    loader.get_model = get_model
+    monkeypatch.setitem(sys.modules, loader.__name__, loader)
+    facade = DualFrankaVLAFacade("/unused/checkpoint", "test/dataset")
+    try:
+        status = facade._dispatch("vla.status", (), {})
+        assert status["config"]["openpi"]["action_chunk"] == 20
+        assert calls == []
+        actions = facade._dispatch("vla.predict", ({},), {"options": {"mode": "eval"}})
+        assert actions.shape == (20, 20) and actions.dtype == np.float32
+        assert calls == ["eval"]
+    finally:
+        facade.close()

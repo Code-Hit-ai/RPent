@@ -191,6 +191,7 @@ def test_explore_prompt_and_factory_use_local_layered_memory(tmp_path):
     parser = argparse.ArgumentParser()
     parser.add_argument("--explore", action="store_true")
     parser.add_argument("--memory-dir")
+    parser.add_argument("--memory-profile", default=None)
     parser.add_argument("--output-dir")
     robot_spec.get_robot_spec().add_cli_args(parser, False)
     args = parser.parse_args(
@@ -355,7 +356,7 @@ Observed success in session 2.
     spec = replace(robot_spec.get_robot_spec(), init_runtime=init_runtime)
     monkeypatch.setattr(cli, "get_robot_spec", lambda name: spec)
     monkeypatch.setattr(cli, "build_planner", Planner)
-    monkeypatch.setattr("rpent.cli.operator_input.OperatorInput", Operator)
+    monkeypatch.setattr("rpent.tools.human_in_the_loop.HumanInTheLoopInput", Operator)
     monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: True))
     monkeypatch.setattr(
         sys,
@@ -541,10 +542,11 @@ def test_direct_success_with_failed_observation_does_not_publish(setup):
     assert t.write_recipe("dual_franka_t0") is None
 
 
+@pytest.mark.parametrize("robot_name", ["dual_franka", "libero"])
 @pytest.mark.parametrize("verdict", ["success", "failure", "abort"])
 @pytest.mark.parametrize("planner_error", [None, "planner transport failed"])
 def test_cli_direct_verdict_finalizes_and_merges_only_without_errors(
-    tmp_path, monkeypatch, verdict, planner_error
+    tmp_path, monkeypatch, verdict, planner_error, robot_name
 ):
     import sys
     from dataclasses import replace
@@ -584,6 +586,12 @@ def test_cli_direct_verdict_finalizes_and_merges_only_without_errors(
         ),
     )
     monkeypatch.setattr(cli, "get_robot_spec", lambda name: spec)
+    original_toolkit_factory = cli.get_toolkit
+    monkeypatch.setattr(
+        cli,
+        "get_toolkit",
+        lambda name, **kwargs: original_toolkit_factory("dual_franka", **kwargs),
+    )
     monkeypatch.setattr(cli, "build_planner", lambda *args, **kwargs: Planner())
     monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: True))
     monkeypatch.setattr(
@@ -592,7 +600,7 @@ def test_cli_direct_verdict_finalizes_and_merges_only_without_errors(
         [
             "rpent",
             "--robot",
-            "dual_franka",
+            robot_name,
             "--explore",
             "--interactive",
             "--output-dir",

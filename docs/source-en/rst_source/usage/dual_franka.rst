@@ -258,10 +258,15 @@ explicit permissions. The connectivity probe remains read-only.
 Attended exploration
 --------------------
 
-``dual_franka --explore`` supports the operator workflow from PR #176. It reuses
+``dual_franka --explore`` waits for operator scene confirmation before robot
+reset and records human verdicts with observation evidence. It reuses
 RPent's exploration sessions and layered memory while retaining the existing
 real-robot RGB/depth/state logs. This does not enable single-arm ``franka``
 exploration.
+
+Robots opt into human-interactive exploration through
+``RobotSpec.supports_human_interactive_exploration``. The five operator commands
+appear in interactive help only when this capability is active in exploration mode.
 
 .. code-block:: bash
 
@@ -354,10 +359,12 @@ The existing manual primitive entry remains ``robots/dual_franka/run_manual_skil
 Diagnostics do not register task IDs 103/104 or dispatch through the shared runner.
 ``--task-id`` selects an existing VLA task profile (default 1); the policy instruction
 comes from its ``vla_instruction`` unless overridden with ``--instruction``.
+Run the following command from a source checkout. The diagnostic initializes only
+the environment and VLA components; configured SAM3 services are not started or contacted.
 
 .. code-block:: bash
 
-   python -m robots.dual_franka.vla_test --task-id 1 \
+   python -m tests.manual.dual_franka_vla --task-id 1 \
      --robot-config /path/to/robot.yaml --calibration-path /path/to/calibration.json \
      --vla-model-path /path/to/checkpoint --vla-repo-id org/dataset
 

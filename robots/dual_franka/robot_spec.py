@@ -113,6 +113,7 @@ def get_robot_spec() -> RobotSpec:
         dashboard=DUAL_FRANKA_DASHBOARD_SPEC,
         is_real_robot=True,
         supports_exploration=True,
+        supports_human_interactive_exploration=True,
     )
 
 
@@ -209,7 +210,7 @@ def _parse_config(args: argparse.Namespace) -> RunConfig:
     if args.task_id is None:
         raise ValueError("--task-id is required")
     task = get_dual_franka_task(args.task_id)
-    explore = bool(getattr(args, "explore", False))
+    explore = args.explore
     timestamp = datetime.now().strftime("%Y%m%d-%H:%M:%S")
     output_dir = Path(
         args.output_dir
@@ -217,7 +218,7 @@ def _parse_config(args: argparse.Namespace) -> RunConfig:
     )
     memory_dir = (
         Path(args.memory_dir).expanduser().resolve()
-        if getattr(args, "memory_dir", None)
+        if args.memory_dir
         else get_memory_dir("dual_franka")
     )
     constraints = "\n".join(
@@ -235,15 +236,13 @@ def _parse_config(args: argparse.Namespace) -> RunConfig:
             "constraints": constraints,
             "recipe_tag": f"dual_franka_t{args.task_id}",
             "mode": "explore" if explore else "eval",
-            "memory_profile": getattr(args, "memory_profile", None),
+            "memory_profile": args.memory_profile,
             "memory_dir": str(memory_dir),
             "memory_inbox": str(
                 memory_dir / "_internal" / "inbox" / f"dual_franka_t{args.task_id}"
             ),
             "session_number": 1,
-            "session_max": max(1, getattr(args, "explore_sessions", 1))
-            if explore
-            else 1,
+            "session_max": max(1, args.explore_sessions) if explore else 1,
         },
         task_desc={"task_id": args.task_id, "task_name": task.name},
     )

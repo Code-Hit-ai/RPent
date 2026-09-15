@@ -18,12 +18,12 @@ import threading
 
 import pytest
 
-from rpent.cli.operator_input import OperatorInput
+from rpent.tools.human_in_the_loop import HumanInTheLoopInput
 from rpent.tools.toolkit import ToolCancelled
 
 
 def test_operator_replies_are_request_scoped_and_do_not_consume_steering(monkeypatch):
-    broker = OperatorInput(interactive=True)
+    broker = HumanInTheLoopInput(interactive=True)
     ready = threading.Event()
     result = []
     monkeypatch.setattr("builtins.print", lambda *args, **kwargs: ready.set())
@@ -44,7 +44,7 @@ def test_operator_replies_are_request_scoped_and_do_not_consume_steering(monkeyp
 
 
 def test_operator_eof_and_cancellation_release_pending_requests(monkeypatch):
-    broker = OperatorInput(interactive=True)
+    broker = HumanInTheLoopInput(interactive=True)
     ready = threading.Event()
     result = []
     monkeypatch.setattr("builtins.print", lambda *args, **kwargs: ready.set())
@@ -58,7 +58,7 @@ def test_operator_eof_and_cancellation_release_pending_requests(monkeypatch):
     assert result == [None] and broker._pending is None
     assert broker("late request", lambda: None) is None
 
-    broker = OperatorInput(interactive=True)
+    broker = HumanInTheLoopInput(interactive=True)
 
     def cancelled():
         raise ToolCancelled("cancelled")
@@ -121,7 +121,7 @@ def test_interactive_reader_routes_operator_input_without_stealing_steering(
 
 
 def test_success_is_control_and_never_steering():
-    broker = OperatorInput(interactive=True)
+    broker = HumanInTheLoopInput(interactive=True)
     calls = []
     broker.bind_verdict(lambda verdict: calls.append(verdict) or True)
     assert not broker.route_line(" success ")
@@ -134,7 +134,7 @@ def test_success_is_control_and_never_steering():
 
 
 def test_only_slash_verdicts_are_control_commands():
-    broker = OperatorInput(interactive=True)
+    broker = HumanInTheLoopInput(interactive=True)
     verdicts = []
     broker.bind_verdict(lambda verdict: verdicts.append(verdict) or True)
     for text in (
@@ -160,7 +160,7 @@ def test_only_slash_verdicts_are_control_commands():
 def test_shortcuts_only_answer_matching_active_request(
     monkeypatch, kind, command, wrong, answer
 ):
-    broker = OperatorInput(interactive=True)
+    broker = HumanInTheLoopInput(interactive=True)
     ready = threading.Event()
     values = []
     monkeypatch.setattr("builtins.print", lambda *a, **kw: ready.set())
@@ -181,10 +181,22 @@ def test_shortcuts_only_answer_matching_active_request(
 
 
 def test_abort_is_control_but_bare_words_are_chat():
-    broker = OperatorInput(interactive=True)
+    broker = HumanInTheLoopInput(interactive=True)
     calls = []
     broker.bind_verdict(lambda verdict: calls.append(verdict) or True)
     assert broker.route_line("/abort")
     assert calls == ["abort"]
     for word in ("done", "continue", "abort", "success", "failure"):
         assert not broker.route_line(word)
+
+
+def test_help_only_shows_human_commands_when_enabled(capsys):
+    from rpent.cli.tui import handle_local_command
+
+    assert handle_local_command("/help")
+    normal = capsys.readouterr().out
+    assert "/quit" in normal and "/success" not in normal
+    assert handle_local_command("/help", extra_help=HumanInTheLoopInput.help_text)
+    active = capsys.readouterr().out
+    for command in ("/done", "/continue", "/success", "/failure", "/abort"):
+        assert command in active

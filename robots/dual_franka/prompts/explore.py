@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Attended real-robot exploration, based on PR #176's operator contract.
+"""Human-interactive real-robot exploration with scene confirmation and verdicts.
 
 This prompt uses the existing RPent memory tiers. It deliberately does not
 inherit LIBERO's reset, simulator termination, or benchmark-solvability rules.
