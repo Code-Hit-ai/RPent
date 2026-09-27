@@ -397,3 +397,6 @@ robot configuration. Translation annotations name ``base``, ``d455``,
 ``left_wrist`` or ``right_wrist`` with depth and valid calibration.
 Primitive moves specify ``arm: left`` or ``arm: right``; left-arm workspace
 checks convert the shared right-base target into the left-base frame.
+
+The shared workflow also documents optional ``--grounding-agent-model``
+fallback, which applies to both arms through the same localization path.

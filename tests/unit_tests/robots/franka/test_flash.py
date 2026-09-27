@@ -282,3 +282,115 @@ def test_generate_from_reviewed_recording(scene, tmp_path, monkeypatch):
             molmo=scene.grounder,
             human_verdict="failure",
         )
+
+
+@pytest.mark.parametrize("failure_kind", ["depth", "rpc", "missing"])
+def test_agent_fallback_is_shared_by_both_robots(scene, monkeypatch, failure_kind):
+    from robots.franka.flash.grounding import localize_with_fallback
+
+    calls = []
+    projection(monkeypatch, scene, [0.45, 0, 0.3])
+    module = importlib.import_module(f"robots.{scene.robot}.perception")
+    monkeypatch.setattr(
+        module,
+        "back_project",
+        lambda **kw: (
+            {"error": "no valid depth near pixel"}
+            if kw["col"] == 1
+            else {
+                "point_base": [0.45, 0, 0.3],
+                "point_xyz": [0.45, 0, 0.3],
+                "selection_valid": True,
+            }
+        ),
+    )
+
+    def molmo(*args):
+        calls.append("molmo")
+        if len(calls) == 1:
+            if failure_kind == "rpc":
+                raise ConnectionError("Molmo unavailable")
+            if failure_kind == "missing":
+                return MolmoResult(False, None)
+            return MolmoResult(True, (1, 1))
+        return MolmoResult(True, (10, 10))
+
+    def agent(image, prompt):
+        calls.append("agent")
+        assert "cup rim" in prompt
+        assert "previous selection failed" in prompt
+        return MolmoResult(True, (10, 10))
+
+    scene.grounder.ground = molmo
+    fallback = SimpleNamespace(ground=agent)
+    scene.toolkit.refresh_flash_state = lambda: calls.append("refresh")
+    for _ in range(2):
+        point = localize_with_fallback(
+            scene.toolkit,
+            scene.robot,
+            scene.card["plan"][0]["anchor"],
+            scene.grounder,
+            arm="right" if scene.robot == "dual_franka" else None,
+            agent=fallback,
+        )
+        np.testing.assert_allclose(point, [0.45, 0, 0.3])
+    assert calls == ["molmo", "refresh", "agent", "molmo"]
+
+
+def test_agent_failure_never_moves(scene, monkeypatch):
+    projection(monkeypatch, scene, error="no valid depth near pixel")
+    calls = []
+    fallback = SimpleNamespace(
+        ground=lambda *a: calls.append("agent") or MolmoResult(True, (10, 10))
+    )
+    with pytest.raises(ValueError, match="depth"):
+        replay(
+            scene.toolkit,
+            scene.card,
+            scene.grounder,
+            scene.workspace,
+            human=lambda *a: "start",
+            grounding_agent=fallback,
+        )
+    assert calls == ["agent"] and scene.actions == []
+    assert [e["provider"] for e in scene.saved["flash_grounding.json"]["attempts"]] == [
+        "molmo",
+        "agent",
+    ]
+
+
+def test_agent_success_reaches_motion(scene, monkeypatch):
+    projection(monkeypatch, scene, [0.45, 0, 0.3])
+    scene.grounder.ground = lambda *a: MolmoResult(False, None)
+    fallback = SimpleNamespace(ground=lambda *a: MolmoResult(True, (10, 10)))
+    answers = iter(["start", "success"])
+    outcome = replay(
+        scene.toolkit,
+        scene.card,
+        scene.grounder,
+        scene.workspace,
+        human=lambda *a: next(answers),
+        grounding_agent=fallback,
+    )
+    assert outcome["done"] and len(scene.actions) == 1
+
+
+def test_cancellation_does_not_trigger_agent(scene):
+    from rpent.tools.toolkit import ToolCancelled
+
+    def cancelled(*args):
+        raise ToolCancelled("operator cancelled")
+
+    scene.grounder.ground = cancelled
+    calls = []
+    fallback = SimpleNamespace(ground=lambda *a: calls.append("agent"))
+    with pytest.raises(ToolCancelled):
+        replay(
+            scene.toolkit,
+            scene.card,
+            scene.grounder,
+            scene.workspace,
+            human=lambda *a: "start",
+            grounding_agent=fallback,
+        )
+    assert not calls and not scene.actions
