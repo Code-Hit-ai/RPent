@@ -385,3 +385,15 @@ execution blocks further motion until restart. RPC success is not task success.
 Action validation expects 20 steps per prediction chunk. For a checkpoint with a
 different chunk length, set ``--expected-action-steps`` explicitly to match it.
 External model servers use the standard VLA prediction and health-check RPCs.
+
+
+Flash replay
+============
+
+Dual Franka uses the shared :ref:`Franka Flash workflow <franka-flash>`.
+Generate with ``--robot dual_franka --task dual_franka_t0`` and replay with
+``--robot dual_franka --planner flash --task-id 0``. Use a dual-arm plan and
+robot configuration. Translation annotations name ``base``, ``d455``,
+``left_wrist`` or ``right_wrist`` with depth and valid calibration.
+Primitive moves specify ``arm: left`` or ``arm: right``; left-arm workspace
+checks convert the shared right-base target into the left-base frame.

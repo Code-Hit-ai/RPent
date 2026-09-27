@@ -45,6 +45,9 @@ class FrankaToolkit(Toolkit):
         memory: MemoryManager,
         state_output_dir: Path | str | None = None,
     ) -> None:
+        runtime_kwargs = dict(runtime_kwargs)
+        self.flash_options = runtime_kwargs.pop("flash_options", None)
+        self._flash_solved = False
         state = EnvState(Path(state_output_dir or get_output_dir()))
         super().__init__(
             dashboard_events=dashboard_events,
@@ -90,6 +93,21 @@ class FrankaToolkit(Toolkit):
             name = spec["name"]
             handler = state_handlers.get(name) or getattr(self._primitives, name)
             self.add_tool(name, spec, handler)
+
+    def solved(self) -> bool:
+        """Return the operator-confirmed Flash replay outcome."""
+        return self._flash_solved
+
+    def refresh_flash_state(self) -> None:
+        """Capture current cameras and TCP without a reset or motion."""
+        record = self._tools_module.dump_state(
+            self._primitives,
+            self._state,
+            command={"action": "flash_observe"},
+            result={"ok": True},
+            elapsed_s=0.0,
+        )
+        self._publish_step(record)
 
     def get_env_state(
         self,

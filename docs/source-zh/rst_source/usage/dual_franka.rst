@@ -383,3 +383,14 @@ JSON/NPZ，拒绝无效观测或动作；执行结果不确定时禁止继续运
 RPC 成功不代表任务成功。动作校验默认要求每块预测包含 20 步；如果 checkpoint
 使用不同块长度，请通过 ``--expected-action-steps`` 显式指定匹配的值。
 外部模型服务使用标准 VLA 推理和健康检查 RPC。
+
+
+Flash 回放
+==========
+
+双臂使用共享的 :ref:`Franka Flash 流程 <franka-flash>`。生成任务卡时使用
+``--robot dual_franka --task dual_franka_t0``，回放时使用
+``--robot dual_franka --planner flash --task-id 0``，并提供双臂任务卡及配置。
+平移标注使用具有深度和有效标定的 ``base``、``d455``、``left_wrist`` 或
+``right_wrist`` 相机。移动原语通过 ``arm: left`` 或 ``arm: right`` 指定机械臂；
+左臂工作空间检查会把共享的右基座目标坐标转换到左基座坐标系。
