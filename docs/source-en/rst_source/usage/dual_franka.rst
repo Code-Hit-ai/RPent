@@ -35,10 +35,9 @@ Hand-eye calibration is performed with ROS
 `easy_handeye <https://github.com/IFL-CAMP/easy_handeye>`_. Calibrate both
 projection cameras against the right arm's base frame (two eye-on-base
 calibrations): ``base_camera`` (the third-person RealSense) and ``d455_camera``.
-The two wrist cameras (``left_wrist`` and ``right_wrist``) are observation
-only — they feed the VLA policy views and the close-up planner snapshots, and
-RPent never back-projects pixels through them — so they need no hand-eye
-calibration.
+Wrist cameras are observation-only in the default configuration. To use a
+wrist RGBD camera for projection, configure its calibration and projection view
+as described below.
 
 Easy_handeye saves one YAML per camera under ``~/.ros/easy_handeye/`` by default.
 RPent loads those YAMLs directly: list them under ``perception.calibration`` in
@@ -54,6 +53,20 @@ the robot config, mapping each camera to its easy_handeye YAML (the checked-in
 
 Paths may be absolute, ``~``-prefixed, or relative; relative paths resolve
 against the working directory RPent is launched from.
+
+
+Wrist projection is optional. Uncomment the wrist entries under
+``perception.calibration`` and ``perception.projection_views`` in the example
+configuration, and configure RGBD cameras with aligned depth and color intrinsics.
+Each wrist calibration YAML needs ``arm: left`` or ``arm: right`` at the top
+level, ``parameters.eye_on_hand: true``, and
+``parameters.robot_effector_frame: left_ee_O_T_EE`` or ``right_ee_O_T_EE``.
+Its ``transformation`` maps camera coordinates into that end-effector frame.
+RPent combines it with the selected snapshot's end-effector pose and, for poses
+in ``left_base``, the configured base-frame transform, to produce ``right_base``
+points. Snapshot TCP poses must represent O_T_EE and declare their base frame.
+The default Lumos observation cameras are not automatically enabled for RGBD
+projection; selecting a wrist anchor requires this configuration.
 
 Development configuration
 -------------------------

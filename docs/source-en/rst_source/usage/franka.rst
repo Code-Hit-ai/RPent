@@ -169,8 +169,13 @@ Generate a plan offline from the reviewed recording (Molmo must be reachable)::
 
 Confirm the source success when prompted. The generator rejects unsupported
 commands and does not overwrite an existing destination. It stores hashes of
-the robot configuration and calibration files; regenerate and review the plan
-if those files change. Dual Franka uses ``--robot dual_franka --task dual_franka_t0``.
+the robot configuration and calibration files. New recordings save
+``recording_fingerprint.json``; generation rejects missing fingerprints or
+configuration/calibration changes since recording before localizing anchors.
+Re-record after such changes; older recordings without provenance cannot be used.
+Replay also checks the plan against the current files. Known observation/verdict
+records and an initial confirmed scene reset are excluded from the plan; resets
+after task actions are rejected to prevent combining attempts. Dual Franka uses ``--robot dual_franka --task dual_franka_t0``.
 
 Replay from a dedicated operator terminal::
 

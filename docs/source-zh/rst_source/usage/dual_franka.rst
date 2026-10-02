@@ -30,9 +30,8 @@ RPent 可以通过 RLinf ``RealWorldEnv`` worker 控制双节点双臂 Franka �
 手眼标定使用 ROS `easy_handeye
 <https://github.com/IFL-CAMP/easy_handeye>`_ 完成。两台投影相机都需要相对右臂的
 base frame 做标定（两次 eye-on-base 标定）：``base_camera`` （第三人称
-RealSense）和 ``d455_camera``。两台腕部相机（ ``left_wrist`` 和
-``right_wrist`` ）只用于观测：它们为 VLA 提供 policy 视图、为 planner 提供近距
-离快照，RPent 不会通过它们做像素反投影，因此不需要手眼标定。
+RealSense）和 ``d455_camera``。腕部相机在默认配置中仅用于观测。若使用腕部 RGBD 相机进行投影，
+需要按下文配置手眼标定和投影视图。
 
 easy_handeye 默认在 ``~/.ros/easy_handeye/`` 下为每台相机保存一个 YAML。RPent
 会直接加载这些 YAML：在 robot config 的 ``perception.calibration`` 下将每台
@@ -48,6 +47,18 @@ easy_handeye 默认在 ``~/.ros/easy_handeye/`` 下为每台相机保存一个 Y
 
 路径可以是绝对路径、以 ``~`` 开头的路径或相对路径；相对路径会相对启动
 RPent 时的工作目录解析。
+
+
+腕部投影为可选功能。在示例配置中取消 ``perception.calibration`` 和
+``perception.projection_views`` 下腕部条目的注释，并配置具有对齐深度和 RGB
+内参的 RGBD 相机。每份腕部标定 YAML 顶层需包含 ``arm: left`` 或 ``arm: right``，
+设置 ``parameters.eye_on_hand: true``，并将
+``parameters.robot_effector_frame`` 设置为 ``left_ee_O_T_EE`` 或
+``right_ee_O_T_EE``。``transformation`` 将相机坐标转换到对应末端坐标系。
+RPent 将其与所选快照中的末端位姿组合；若位姿使用 ``left_base``，还会应用
+配置的基座变换，最终输出 ``right_base`` 坐标。快照 TCP 位姿必须对应 O_T_EE，
+并声明基座坐标系。默认的 Lumos 观测相机不会自动启用 RGBD 投影；选择腕部锚点前
+必须完成这些配置。
 
 开发配置
 --------
