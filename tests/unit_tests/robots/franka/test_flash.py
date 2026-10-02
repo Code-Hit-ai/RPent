@@ -263,6 +263,7 @@ def test_generate_from_reviewed_recording(scene, tmp_path, monkeypatch):
             "result": {"ok": True},
         },
     ]
+    (tmp_path / "recording_fingerprint.json").write_text("{}")
     (tmp_path / "states.json").write_text(json.dumps({"steps": steps}))
     card = generate(
         tmp_path,
@@ -428,3 +429,67 @@ def test_dual_projection_exception_fallback(scene, monkeypatch, failure):
             replay(scene.toolkit, scene.card, scene.grounder, scene.workspace, **kwargs)
         assert not scene.actions
         assert ("agent" in calls) == (failure == "always")
+
+
+@pytest.mark.parametrize("provenance", [None, {"robot_config": "old"}])
+def test_generation_rejects_missing_or_changed_calibration_before_grounding(
+    scene, tmp_path, monkeypatch, provenance
+):
+    from robots.franka.flash.generate import generate
+
+    module = importlib.import_module("robots.franka.flash.generate")
+    monkeypatch.setattr(module, "fingerprint", lambda: {"robot_config": "new"})
+    if provenance is not None:
+        (tmp_path / "recording_fingerprint.json").write_text(json.dumps(provenance))
+    with pytest.raises(ValueError, match="provenance|changed since recording"):
+        generate(
+            tmp_path,
+            {},
+            robot=scene.robot,
+            task=scene.card["task"],
+            molmo=scene.grounder,
+            human_verdict="success",
+        )
+
+
+@pytest.mark.parametrize("second_reset", [False, True])
+def test_generation_filters_workflow_records_but_rejects_multiple_attempts(
+    scene, tmp_path, monkeypatch, second_reset
+):
+    from robots.franka.flash.generate import generate
+
+    module = importlib.import_module("robots.franka.flash.generate")
+    monkeypatch.setattr(module, "fingerprint", lambda: {})
+    reset = {"scene_reset_confirmed": True, "robot_reset": {"ok": True}}
+    actions = [
+        ("request_scene_reset", reset),
+        ("open_gripper", {"ok": True}),
+        ("observe_for_verdict", {}),
+        ("request_operator_verdict", {"status": "success"}),
+    ]
+    if second_reset:
+        actions.append(("request_scene_reset", reset))
+    state = scene.state.get().state
+    steps = [{"step_idx": 0, "state": state}]
+    for index, (action, result) in enumerate(actions, 1):
+        command = {"action": action}
+        if action == "open_gripper" and scene.robot == "dual_franka":
+            command["arm"] = "right"
+        steps.append(
+            {"step_idx": index, "state": state, "command": command, "result": result}
+        )
+    (tmp_path / "recording_fingerprint.json").write_text("{}")
+    (tmp_path / "states.json").write_text(json.dumps({"steps": steps}))
+    kwargs = {
+        "robot": scene.robot,
+        "task": scene.card["task"],
+        "molmo": scene.grounder,
+        "human_verdict": "success",
+    }
+    if second_reset:
+        with pytest.raises(ValueError, match="multiple attempts"):
+            generate(tmp_path, {}, **kwargs)
+    else:
+        card = generate(tmp_path, {}, **kwargs)
+        assert [entry["action"] for entry in card["plan"]] == ["open_gripper"]
+        assert card["plan"][0]["source_step"] == 2

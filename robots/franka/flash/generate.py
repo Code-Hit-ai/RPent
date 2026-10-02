@@ -51,6 +51,16 @@ def generate(
     """Ground annotated source moves and retain the recorded primitive order."""
     if human_verdict != "success":
         raise ValueError("only human-confirmed success may generate a Flash plan")
+    provenance_path = Path(run_dir) / "recording_fingerprint.json"
+    if not provenance_path.is_file():
+        raise ValueError(
+            "source recording lacks calibration provenance; re-record the attempt"
+        )
+    requirements = fingerprint()
+    if json.loads(provenance_path.read_text()) != requirements:
+        raise ValueError(
+            "configuration or calibration changed since recording; re-record the attempt"
+        )
     state = RecordedState(run_dir)
     outcome_path = Path(run_dir) / "flash_outcome.json"
     if (
@@ -73,10 +83,20 @@ def generate(
         action = command["action"]
         if action == "request_operator_verdict":
             checked_result(row.get("result"))
-            if row["result"].get("status") == "failure":
+            if row["result"].get("status") in {"failure", "abort"}:
                 raise ValueError("source operator reported failure")
             continue
-        if action == "flash_observe":
+        if action == "request_scene_reset":
+            checked_result(row.get("result"))
+            if row["result"].get("scene_reset_confirmed") is not True:
+                raise ValueError("source scene reset was not confirmed")
+            checked_result(row["result"].get("robot_reset"))
+            if plan:
+                raise ValueError(
+                    "source contains multiple attempts; select one successful attempt"
+                )
+            continue
+        if action in {"flash_observe", "observe_for_verdict"}:
             checked_result(row.get("result"))
             continue
         if action not in ACTIONS:
@@ -126,7 +146,7 @@ def generate(
                 (Path(run_dir) / "states.json").read_bytes()
             ).hexdigest(),
         },
-        "requirements": fingerprint(),
+        "requirements": requirements,
         "plan": plan,
     }
     return validate_card(card)
