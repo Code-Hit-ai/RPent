@@ -306,6 +306,7 @@ def _start_continuation_session(
         claude_code_max_budget_usd=args.claude_code_max_budget_usd,
         dashboard_events=dashboard_events,
         no_images=args.no_images,
+        interactive=args.interactive,
     )
     system_prompt = prompt_bundle.render(
         "system",
@@ -360,7 +361,12 @@ def main() -> int:
     )
     if args.dashboard and args.interactive:
         parser.error("--dashboard and --interactive cannot be used together")
-    if robot_spec.is_real_robot and not human_interactive_exploration:
+    external_env_dashboard = (getattr(robot_spec, "dashboard", None) or {}).get(
+        "external_env", False
+    )
+    if robot_spec.is_real_robot and not (
+        human_interactive_exploration or external_env_dashboard
+    ):
         if args.dashboard or args.interactive:
             parser.error(
                 "This robot requires exclusive terminal input for operator confirmation; "
@@ -368,6 +374,7 @@ def main() -> int:
             )
         if sys.stdin is None or not sys.stdin.isatty():
             parser.error("This robot requires a TTY for operator confirmation.")
+    native_cli = args.interactive and args.planner == "api"
     if args.base_url and args.planner in BASE_URL_ENV_BY_PLANNER:
         parser.error(
             "--base-url applies to the 'api' planner only; "
@@ -452,6 +459,7 @@ def main() -> int:
         claude_code_max_budget_usd=args.claude_code_max_budget_usd,
         dashboard_events=dashboard_events,
         no_images=args.no_images,
+        interactive=args.interactive,
     )
     prompt_bundle = robot_spec.prompts
     prompt_vars = {**prompt_vars, "output_dir": output_dir}
@@ -468,10 +476,13 @@ def main() -> int:
     if human_interactive_exploration:
         from rpent.tools.human_in_the_loop import HumanInTheLoopInput
 
-        operator_input = HumanInTheLoopInput(interactive=args.interactive)
+        # The native CLI reads between runs, leaving the TTY available to tools.
+        operator_input = HumanInTheLoopInput(
+            interactive=args.interactive and not native_cli
+        )
     input_queue: "queue.Queue[str | None] | None" = None
     await_first_prompt: "Callable[[], str | None] | None" = None
-    if args.interactive:
+    if args.interactive and not native_cli:
         input_queue = queue.Queue()
         # Pre-fill the first prompt with the rendered default task (editable
         # preset);
@@ -575,7 +586,7 @@ def main() -> int:
                     config=run_config,
                 )
             memory_manager = toolkit.memory
-            if operator_input is not None and args.interactive:
+            if operator_input is not None and input_queue is not None:
 
                 def accept_verdict(verdict: str, active_toolkit=toolkit) -> bool:
                     if not active_toolkit.request_direct_verdict(verdict):
@@ -618,7 +629,7 @@ def main() -> int:
                     if solved and callable(write_recipe):
                         recipe_path = write_recipe(recipe_tag) or recipe_path
             finally:
-                if operator_input is not None and args.interactive:
+                if operator_input is not None and input_queue is not None:
                     operator_input.bind_verdict(None)
                 try:
                     if robot_spec.finalize_run is not None:
@@ -669,6 +680,7 @@ def main() -> int:
         "model": args.model,
         "elapsed_s": round(elapsed, 1),
         "finish": finish_result,
+        "environment_success": environment_success,
         "stats": stats,
         "messages": _serialize_messages(messages),
     }
