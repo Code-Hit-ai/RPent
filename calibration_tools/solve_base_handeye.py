@@ -28,6 +28,7 @@ from common import (
     Array,
     Record,
     check_camera,
+    check_opencv,
     check_state,
     delta,
     errors,
@@ -305,6 +306,7 @@ def main() -> None:
         "--camera-serial", help="Optional expected serial; defaults to the first sample"
     )
     args = parser.parse_args()
+    check_opencv()
     logging.basicConfig(level=logging.INFO)
     run(args.session, args.arm, args.camera_serial)
 

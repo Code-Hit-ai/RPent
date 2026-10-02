@@ -31,6 +31,11 @@ RPent 可以通过 RLinf ``RealWorldEnv`` worker 控制双节点双臂 Franka �
 观测，不需要参与这一步。可使用 ``calibration_tools/``，也可继续使用
 ROS `easy_handeye <https://github.com/IFL-CAMP/easy_handeye>`_，最终加载格式均为 YAML。
 
+本工具支持 D435，已在 D435 配置下验证；其他型号和流配置尚未验证，不能保证
+仅修改参数即可使用。零畸变系数可直接使用；非零系数仅支持
+``distortion.brown_conrady``。不支持的非零畸变模型会拒绝采样，并显示模型和
+系数，不会自动转换或忽略畸变。
+
 **1. 准备环境**
 
 在相机节点激活已有的 RLinf Franka 运行环境，然后进入 RPent 仓库根目录，
@@ -40,8 +45,9 @@ ROS `easy_handeye <https://github.com/IFL-CAMP/easy_handeye>`_，最终加载格
 
    source /absolute/path/to/franka-env/bin/activate
    cd /absolute/path/to/RPent
-   python -c "import numpy, scipy, yaml, pyrealsense2, cv2; assert hasattr(cv2.aruco, 'CharucoDetector'), 'OpenCV lacks CharucoDetector'"
+   PYTHONPATH=calibration_tools python -c "import numpy, scipy, yaml, pyrealsense2; from common import check_opencv; check_opencv()"
 
+检查包含 ChArUco、PnP、``calibrateHandEye`` 及所需方法常量。
 若现有环境不满足依赖，可另建标定环境，避免改动策略运行环境：
 
 .. code-block:: bash
@@ -91,11 +97,13 @@ ROS `easy_handeye <https://github.com/IFL-CAMP/easy_handeye>`_，最终加载格
 
 打开 ``http://127.0.0.1:8767``，人工调整右臂，释放引导按钮并停稳后点击
 ``Capture pose``。建议采集 20–30 个不同姿态，覆盖多个旋转轴；求解至少需要十组。
-工具只读取状态，不会移动机械臂。
+工具只读取状态，不会移动机械臂。不传 ``--output`` 时，默认写入脚本所在目录下的
+``calibration_tools/sessions/``，与启动时的工作目录无关。
 
 完成后按 ``Ctrl+C`` 停止采集器。标定 D455 时重复上述命令，将序列号换成
 ``D455_SERIAL``、URL 换成 ``/raw/d455``、输出目录换成
-``calibration_tools/sessions/d455-to-right``。每次采集使用新目录。
+``calibration_tools/sessions/d455-to-right``。每次采集使用新目录；D455 流配置
+需先确认符合上面的畸变模型支持范围。
 
 **3. 求解并导出**
 

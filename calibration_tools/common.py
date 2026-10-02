@@ -29,6 +29,35 @@ Record = dict[str, Any]
 METHODS = ("TSAI", "PARK", "HORAUD", "ANDREFF", "DANIILIDIS")
 
 
+def check_opencv() -> None:
+    """Require the OpenCV APIs used by collection and hand-eye fitting."""
+    import cv2
+
+    required = (
+        "aruco.CharucoBoard",
+        "aruco.CharucoParameters",
+        "aruco.CharucoDetector",
+        "aruco.getPredefinedDictionary",
+        "solvePnP",
+        "Rodrigues",
+        "projectPoints",
+        "calibrateHandEye",
+    ) + tuple("CALIB_HAND_EYE_" + method for method in METHODS)
+    missing = []
+    for name in required:
+        value = cv2
+        for part in name.split("."):
+            value = getattr(value, part, None)
+            if value is None:
+                missing.append(name)
+                break
+    if missing:
+        raise RuntimeError(
+            f"OpenCV {cv2.__version__} lacks required APIs: {', '.join(missing)}. "
+            "Install calibration_tools/requirements.txt in a separate environment."
+        )
+
+
 def rigid_transform(value: ArrayLike, name: str = "transform") -> Array:
     """Validate and return a finite SE(3) matrix, without projecting rotations."""
     matrix = np.asarray(value, dtype=float)

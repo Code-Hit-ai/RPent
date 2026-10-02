@@ -36,6 +36,7 @@ import numpy as np
 from common import (
     Record,
     check_camera,
+    check_opencv,
     check_state,
     delta,
     transform,
@@ -61,6 +62,7 @@ class CaptureConfig:
 
     def __post_init__(self) -> None:
         """Reject invalid geometry and missing device configuration."""
+        check_opencv()
         if self.arm not in ("left", "right"):
             raise ValueError("Arm must be left or right")
         if not self.camera_serial or not self.reader_command:
@@ -171,7 +173,11 @@ class Collector:
         if np.any(dist != 0) and camera["distortion_model"] not in [
             "distortion.brown_conrady"
         ]:
-            raise ValueError("当前非零畸变模型须先转换为 OpenCV 支持的模型")
+            raise ValueError(
+                "Unsupported nonzero distortion: "
+                f"model={camera['distortion_model']}, coefficients={dist.tolist()}. "
+                "Convert to an OpenCV-compatible model before sampling."
+            )
         params = cv2.aruco.CharucoParameters()
         params.cameraMatrix, params.distCoeffs = K, dist
         cc, ci, mc, mi = cv2.aruco.CharucoDetector(self.board, params).detectBoard(im)
@@ -436,7 +442,7 @@ def main() -> None:
     add_arguments(parser)
     args = parser.parse_args()
     config = build_config(args)
-    root = args.output or Path("sessions") / (
+    root = args.output or Path(__file__).resolve().parent / "sessions" / (
         datetime.now().strftime("%Y%m%d_%H%M%S_%f") + f"_{config.arm}_eye_to_hand"
     )
     if root.exists():
