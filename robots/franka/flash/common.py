@@ -181,9 +181,12 @@ def localize(
         if result.get("error"):
             raise GroundingError(result["error"])
         return _grounded_vector(result.get("point_base"))
-    from robots.dual_franka.perception import back_project
+    from robots.dual_franka.perception import InvalidDepthError, back_project
 
-    result = back_project(camera=camera, target_name=anchor["phrase"], **kwargs)
+    try:
+        result = back_project(camera=camera, target_name=anchor["phrase"], **kwargs)
+    except InvalidDepthError as exc:
+        raise GroundingError(str(exc)) from exc
     if result.get("error") or result.get("selection_valid") is not True:
         raise GroundingError(f"invalid projection: {result}")
     point = _grounded_vector(result.get("point_xyz"))

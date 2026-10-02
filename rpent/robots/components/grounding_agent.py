@@ -15,8 +15,15 @@
 """Tool-free visual point selection with the Molmo result contract."""
 
 import io
+import json
 import tempfile
 from dataclasses import replace
+from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field
@@ -90,20 +97,27 @@ class GroundingAgent:
     def _ground_codex(self, image: bytes, prompt: str) -> PointSelection:
         from rpent.planner.codex import build_probe_config, run_probe_turn
 
-        with tempfile.TemporaryDirectory(prefix="rpent-point-agent-") as cwd:
+        with tempfile.TemporaryDirectory(prefix="rpent-point-agent-") as root:
+            cwd = Path(root) / "work"
+            home = Path(root) / "codex"
+            cwd.mkdir()
+            home.mkdir()
             config = build_probe_config(self.base_url)
+            env, provider_overrides = _isolated_codex_environment(config.env, home)
             config = replace(
                 config,
-                cwd=cwd,
-                config_overrides=config.config_overrides
+                cwd=str(cwd),
+                env=env,
+                config_overrides=provider_overrides
+                + config.config_overrides
                 + (
                     "features.shell_tool=false",
                     "features.unified_exec=false",
                     'web_search="disabled"',
                     "apps._default.enabled=false",
-                    "mcp_servers={}",
                 ),
             )
+            _check_codex_mcp_isolation(config)
             answer = run_probe_turn(
                 config,
                 prompt=prompt,
@@ -130,3 +144,83 @@ class GroundingAgent:
                 },
             )
         return PointSelection.model_validate_json(answer)
+
+
+def _isolated_codex_environment(
+    env: dict[str, str], home: Path
+) -> tuple[dict[str, str], tuple[str, ...]]:
+    """Reuse only model/provider settings and file credentials in a fresh home."""
+    source_home = Path(env.get("CODEX_HOME", str(Path.home() / ".codex")))
+    source_config = source_home / "config.toml"
+    settings = {}
+    if source_config.is_file():
+        settings = tomllib.loads(source_config.read_text(encoding="utf-8"))
+    # Explicit RPent provider overrides take precedence over these user defaults.
+    overrides = []
+    for key in (
+        "model_provider",
+        "model_providers",
+        "openai_base_url",
+        "chatgpt_base_url",
+    ):
+        value = settings.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str):
+            overrides.append(f"{key}={json.dumps(value)}")
+        elif key == "model_providers":
+            for name, provider in value.items():
+                for field, item in provider.items():
+                    # Provider entries are TOML primitives, arrays, or nested tables.
+                    overrides.append(
+                        f"model_providers.{json.dumps(name)}.{json.dumps(field)}="
+                        + _toml_value(item)
+                    )
+    auth = source_home / "auth.json"
+    if auth.is_file():
+        # Share normal token refresh without copying credentials into artifacts.
+        (home / "auth.json").symlink_to(auth.resolve())
+    elif settings.get("cli_auth_credentials_store") in ("keyring", "auto"):
+        if not env.get("RPENT_CODEX_PROVIDER_KEY"):
+            raise RuntimeError(
+                "isolated grounding requires file-based Codex login or CODEX_API_KEY; "
+                "OS keyring credentials cannot be reused under a temporary CODEX_HOME"
+            )
+    overrides.append('cli_auth_credentials_store="file"')
+    return {**env, "CODEX_HOME": str(home)}, tuple(overrides)
+
+
+def _toml_value(value: object) -> str:
+    """Encode provider configuration values for Codex's TOML overrides."""
+    if isinstance(value, dict):
+        return (
+            "{"
+            + ", ".join(
+                f"{json.dumps(key)}={_toml_value(item)}" for key, item in value.items()
+            )
+            + "}"
+        )
+    if isinstance(value, list):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
+    return json.dumps(value)
+
+
+def _check_codex_mcp_isolation(config: object) -> None:
+    """Reject inherited enabled MCP servers before starting any model turn."""
+    from openai_codex.client import CodexClient
+    from openai_codex.generated.v2_all import ConfigReadResponse
+
+    with CodexClient(config=config) as client:
+        client.initialize()
+        response = client.request(
+            "config/read",
+            {"cwd": config.cwd, "includeLayers": False},
+            response_model=ConfigReadResponse,
+        )
+        effective = response.config.model_dump()
+    servers = effective.get("mcp_servers", {})
+    enabled = [name for name, server in servers.items() if server.get("enabled", True)]
+    if enabled:
+        raise RuntimeError(
+            "grounding agent refuses inherited MCP servers: " + ", ".join(enabled)
+        )

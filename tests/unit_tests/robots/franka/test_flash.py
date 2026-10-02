@@ -394,3 +394,37 @@ def test_cancellation_does_not_trigger_agent(scene):
             grounding_agent=fallback,
         )
     assert not calls and not scene.actions
+
+
+@pytest.mark.parametrize("failure", ["once", "always", "configuration"])
+def test_dual_projection_exception_fallback(scene, monkeypatch, failure):
+    if scene.robot != "dual_franka":
+        pytest.skip("dual-Franka depth exception contract")
+    from robots.dual_franka import perception
+
+    calls = []
+
+    def project(**kwargs):
+        calls.append("project")
+        if failure == "configuration":
+            raise ValueError("missing calibration")
+        if failure == "always" or calls.count("project") == 1:
+            perception._median_depth(np.zeros((20, 20)), 10, 10, radius=2)
+        return {"point_xyz": [0.45, 0, 0.3], "selection_valid": True}
+
+    monkeypatch.setattr(perception, "back_project", project)
+    fallback = SimpleNamespace(
+        ground=lambda *a: calls.append("agent") or MolmoResult(True, (10, 10))
+    )
+    answers = iter(["start", "success"])
+    kwargs = {"human": lambda *a: next(answers), "grounding_agent": fallback}
+    if failure == "once":
+        assert replay(
+            scene.toolkit, scene.card, scene.grounder, scene.workspace, **kwargs
+        )["done"]
+        assert "agent" in calls and len(scene.actions) == 1
+    else:
+        with pytest.raises(ValueError, match="depth|calibration"):
+            replay(scene.toolkit, scene.card, scene.grounder, scene.workspace, **kwargs)
+        assert not scene.actions
+        assert ("agent" in calls) == (failure == "always")

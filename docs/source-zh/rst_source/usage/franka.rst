@@ -180,7 +180,10 @@ Franka Flash 任务卡
 
 回放命令增加 ``--grounding-agent-model provider:model``，即可在 Molmo 失败后
 尝试一次 Agent 定位。``codex:model`` 使用已有的 Codex CLI 登录及 provider
-配置；API 模型使用已有的 API 模型工厂。可通过 ``--grounding-agent-base-url``
+配置，但使用独立的临时配置目录，不带入用户的 MCP 和插件。启动后若生效配置
+仍包含启用的 MCP，发送图片前就会停止。仅使用系统钥匙串登录时，需要改用文件
+登录或设置 ``CODEX_API_KEY``。API 模型使用已有的 API 模型工厂。
+可通过 ``--grounding-agent-base-url``
 覆盖模型端点。所选模型需要支持图像输入及结构化输出。
 
 单臂和双臂共用这条路径：目标未找到、像素或深度无效、Molmo 请求失败后，刷新

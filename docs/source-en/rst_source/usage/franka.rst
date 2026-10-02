@@ -200,7 +200,11 @@ Optional agent grounding fallback
 
 Add ``--grounding-agent-model provider:model`` to the replay command to enable
 one fallback attempt after Molmo fails. ``codex:model`` uses the existing Codex
-CLI login/provider configuration; API models use the existing API model factory.
+CLI file login and model/provider settings in an isolated temporary configuration
+directory; user MCP servers and plugins are not copied. Enabled MCP servers in
+the effective configuration cause the request to stop before image submission.
+Keyring-only login requires file-based login or ``CODEX_API_KEY`` instead.
+API models use the existing API model factory.
 ``--grounding-agent-base-url`` optionally overrides the model endpoint.
 Use a model that accepts images and returns structured output.
 
