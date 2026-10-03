@@ -28,6 +28,24 @@ MODE = """Inspect `agentview_high.png` returned by `view_env_state`, then use
 `back_project` or `segment` to localize objects before motion."""
 
 
-BEGIN = """Read MEMORY.md and the guides, then call
-`view_env_state({"step": 0})` and inspect `agentview_high.png`. Localize the
-target, then plan and execute."""
+BEGIN = """Read the guides, then call `view_env_state({"step": 0})` and inspect
+`task_language` and `agentview_high.png`. Read matching memory and available
+seed-0 references for the current task and scene, then localize, plan, and execute.
+The observed `task_language` is authoritative: task numbers are not interchangeable
+across suites. If the exact reference is absent, skip it and select memories by
+the observed task; do not substitute a reference from another suite solely by task number."""
+
+
+COMPACT_TASK1 = """Task configuration: suite={{suite}}, task={{task}}, seed={{seed}}.
+Use the task_language returned by the initial observation, not the task index,
+as the goal.
+
+Call view_env_state(step=0), then localize and execute. Do not read memory or
+guide files."""
+
+
+COMPACT_LONG_TASK1 = """Task configuration: suite={{suite}}, task={{task}}, seed={{seed}}.
+Use the task_language returned by the initial observation as the complete goal.
+
+Call view_env_state(step=0), then localize and execute. Do not read memory or
+guide files."""

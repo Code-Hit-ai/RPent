@@ -188,6 +188,7 @@ def _add_cli_args(parser: argparse.ArgumentParser, use_dashboard: bool) -> None:
     )
     parser.add_argument("--task", type=int, default=None, required=required)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--prompt-profile", choices=("default", "compact"), default="default")
     parser.add_argument(
         "--collect-flywheel-data",
         action="store_true",
@@ -280,6 +281,9 @@ def _parse_config(args: argparse.Namespace) -> RunConfig:
 
     recipe_tag = f"{args.suite.replace('libero_', '')}_t{args.task}_s{args.seed}"
     explore = bool(getattr(args, "explore", False))
+    prompt_profile = getattr(args, "prompt_profile", "default")
+    if prompt_profile == "compact" and (explore or args.suite not in ("libero_object_swap", "libero_10") or args.task != 1):
+        raise ValueError("compact supports libero_object_swap or libero_10 task 1 evaluation only")
     requested_profile = getattr(args, "memory_profile", None)
     if explore and requested_profile == "hf":
         raise ValueError("--explore cannot be used with --memory-profile hf")
@@ -297,7 +301,7 @@ def _parse_config(args: argparse.Namespace) -> RunConfig:
         else get_memory_dir("libero")
     )
     local_eval = not explore and memory_profile == "local"
-    if local_eval:
+    if local_eval and prompt_profile != "compact":
         if planner == "flash":
             plan_name = recipe_tag.rsplit("_s", 1)[0]
             has_local_memory = all(
@@ -327,6 +331,7 @@ def _parse_config(args: argparse.Namespace) -> RunConfig:
         "recipe_tag": recipe_tag,
         "mode": "explore" if explore else "eval",
         "memory_profile": memory_profile,
+        "prompt_profile": prompt_profile,
         "memory_dir": str(memory_dir),
         "reference_tag": f"{args.suite.replace('libero_', '')}_t{args.task}_s0",
         # Per-cell inbox: parallel explore runs must not append to a shared file.

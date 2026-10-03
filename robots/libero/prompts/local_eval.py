@@ -20,10 +20,10 @@ from robots.libero.prompts import system as base
 from rpent.prompt.utils import Numbered, PromptNode
 
 (
-    _,
     STEP_READ_GUIDES,
-    _,
     STEP_INSPECT_INITIAL,
+    _,
+    _,
     STEP_PERCEPTION_PASS,
     STEP_EXECUTE,
     STEP_PRIMITIVES,
@@ -41,12 +41,13 @@ different jobs; use every layer that is available:
    `{{memory_dir}}/task_only/{{reference_tag}}_recipe.jsonl` — the matched successful
    audit and command order from seed 0.
 
-Read the task pair and the exact suite leaf when present, then select only the
-relevant global leaves through `MEMORY.md`. Recipes are technique references,
+After inspecting the initial `task_language`, read the matching task pair and
+suite leaf when present, then select only the relevant global leaves through
+`MEMORY.md`. Recipes are technique references,
 not coordinates: re-localize every entity in the current image. Never read
 `_internal/` during evaluation."""
 
-STEP_READ_LOCAL_MEMORY = """READ EACH AVAILABLE LOCAL MEMORY LAYER FIRST:
+STEP_READ_LOCAL_MEMORY = """READ EACH AVAILABLE LOCAL MEMORY LAYER for the observed `task_language`:
 - task audit: `{{memory_dir}}/task_only/{{reference_tag}}.json`
 - task recipe: `{{memory_dir}}/task_only/{{reference_tag}}_recipe.jsonl`
 - suite leaf: find the matching task/regime leaf under `{{memory_dir}}/suite/`
@@ -58,9 +59,9 @@ validated layers. Record the exact files used in final `strategy_notes`. Treat
 absolute coordinates as stale and re-derive them from this scene."""
 
 WORKFLOW_STEPS = (
-    STEP_READ_LOCAL_MEMORY,
     STEP_READ_GUIDES,
     STEP_INSPECT_INITIAL,
+    STEP_READ_LOCAL_MEMORY,
     STEP_PERCEPTION_PASS,
     STEP_EXECUTE,
     STEP_PRIMITIVES,

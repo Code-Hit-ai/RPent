@@ -187,6 +187,10 @@ def _build_argparser() -> argparse.ArgumentParser:
     )
 
     # other config
+    ap.add_argument(
+        "--experience-memory", type=Path,
+        help="Pre-separated demonstration memory (.txt or block-list .json) to include in the prompt.",
+    )
     ap.add_argument("--output-dir", default=None)
     ap.add_argument(
         "--memory-profile",
@@ -408,6 +412,14 @@ def main() -> int:
     args.memory_profile = args.memory_profile or ("local" if args.explore else "hf")
     if args.memory_profile == "hf" and args.memory_dir is not None:
         parser.error("--memory-dir requires --memory-profile local or --explore")
+    from rpent.context.memory import load_memory_blocks
+
+    try:
+        args.experience_blocks = (
+            load_memory_blocks(args.experience_memory) if args.experience_memory else []
+        )
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
     if args.dashboard:
         from rpent.cli.dashboard import run_dashboard_session
 
@@ -464,6 +476,9 @@ def main() -> int:
         "user",
         variables=prompt_vars,
     )
+    from rpent.context.memory import append_memory
+
+    user_msg = append_memory(user_msg, args.experience_blocks)
 
     operator_input = None
     if human_interactive_exploration:
@@ -622,11 +637,11 @@ def main() -> int:
                 if operator_input is not None and args.interactive:
                     operator_input.bind_verdict(None)
                 try:
+                    solved_fn = getattr(toolkit, "solved", None)
+                    environment_success = (
+                        bool(solved_fn()) if callable(solved_fn) else None
+                    )
                     if robot_spec.finalize_run is not None:
-                        solved_fn = getattr(toolkit, "solved", None)
-                        environment_success = (
-                            bool(solved_fn()) if callable(solved_fn) else None
-                        )
                         solved = bool(environment_success)
                 finally:
                     toolkit.close()
@@ -670,6 +685,8 @@ def main() -> int:
         "model": args.model,
         "elapsed_s": round(elapsed, 1),
         "finish": finish_result,
+        "environment_success": environment_success,
+        "agent_error": agent_error,
         "stats": stats,
         "messages": _serialize_messages(messages),
     }

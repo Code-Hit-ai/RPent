@@ -434,7 +434,11 @@ def test_successful_fake_codex_lifecycle_uses_fake_mcp_and_accounts_events(
     assert FakeMcpServer.instances[0].stopped is True
     fake_codex = FakeCodex.instances[0]
     assert fake_codex.closed is True
-    assert fake_codex.thread.turn_prompts[0][0] == "system rules\n\nuser task"
+    submitted_prompt = fake_codex.thread.turn_prompts[0][0]
+    assert submitted_prompt.endswith("system rules\n\nuser task")
+    assert 'if (block.type === "image") image(block);' in submitted_prompt
+    assert 'else if (block.type === "text") text(block.text);' in submitted_prompt
+    assert "Never\nuse text(result)" in submitted_prompt
     assert result.finish_result == {
         "_finish": True,
         "status": "success",
@@ -857,3 +861,23 @@ def test_probe_returns_empty_string_when_the_model_said_nothing(
     )
 
     assert reply == ""
+
+
+def test_context_proxy_preserves_chatgpt_auth_and_requires_explicit_provider_choice(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RPENT_CONTEXT_PROXY_URL", "http://127.0.0.1:18971")
+    config = codex_module.build_codex_config(
+        mcp_url=None, base_url=None, api_key=None, cwd=str(tmp_path)
+    )
+    overrides = config.config_overrides
+    assert "model_providers.rpent_context.requires_openai_auth=true" in overrides
+    assert "model_providers.rpent_context.supports_websockets=false" in overrides
+    with pytest.raises(ValueError, match="either"):
+        codex_module.build_codex_config(
+            mcp_url=None,
+            base_url="https://provider.invalid",
+            api_key=None,
+            cwd=str(tmp_path),
+        )

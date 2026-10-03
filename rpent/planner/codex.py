@@ -60,6 +60,23 @@ PROVIDER_ID = "rpent_proxy"
 PROVIDER_ENV_KEY = "RPENT_CODEX_PROVIDER_KEY"
 _LOOPBACK_NO_PROXY_HOSTS = ("127.0.0.1", "localhost")
 
+_TOOL_OUTPUT_INSTRUCTIONS = """RPent tool output handling:
+When calling RPent MCP tools through exec, forward each result's content blocks:
+
+```javascript
+const result = await tools[toolName](args);
+for (const block of result.content ?? []) {
+  if (block.type === "image") image(block);
+  else if (block.type === "text") text(block.text);
+}
+```
+
+Set toolName and args to the actual tool name and arguments. Apply this
+to every RPent tool result, including observations and action results. Never
+use text(result), text(result.content), JSON.stringify(result), or print image
+base64 data. Preserve the content order and forward all returned text and
+image blocks once."""
+
 
 def _codex_environment() -> dict[str, str]:
     """Build the Codex child environment with direct access to its local MCP."""
@@ -138,6 +155,7 @@ class CodexPlanner:
                 "input_queue and dashboard_interaction cannot be used together"
             )
         prompt = f"{system_prompt}\n\n{user_message}" if system_prompt else user_message
+        prompt = f"{_TOOL_OUTPUT_INSTRUCTIONS}\n\n{prompt}"
         if dashboard_interaction is not None:
             return asyncio.run(
                 self._solve_dashboard(
@@ -817,6 +835,23 @@ def build_codex_config(
         # web_search, image_generation).
         "experimental_api": True,
     }
+    if proxy_url := os.environ.get("RPENT_CONTEXT_PROXY_URL"):
+        if base_url:
+            raise ValueError("Use either RPENT_CONTEXT_PROXY_URL or CODEX_BASE_URL")
+        # The proxy preserves the existing ChatGPT login and processes full HTTP history.
+        proxy_url = proxy_url.rstrip("/")
+        kwargs["config_overrides"] += tuple(
+            f"{key}={json.dumps(value)}"
+            for key, value in {
+                "chatgpt_base_url": proxy_url + "/backend-api",
+                "model_provider": "rpent_context",
+                "model_providers.rpent_context.name": "rpent_context",
+                "model_providers.rpent_context.base_url": proxy_url
+                + "/backend-api/codex",
+                "model_providers.rpent_context.requires_openai_auth": True,
+                "model_providers.rpent_context.supports_websockets": False,
+            }.items()
+        )
     if codex_bin := os.environ.get("CODEX_BIN"):
         kwargs["codex_bin"] = codex_bin
     return openai_codex.CodexConfig(**kwargs)

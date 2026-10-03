@@ -16,6 +16,34 @@
 
 from __future__ import annotations
 
+COMPACT = """You control a robot in a single LIBERO perception-isolated episode.
+Use the supplied tool schemas for parameters. Start by calling
+view_env_state(step=0); its task_language is authoritative.
+
+Identify targets in agentview_high, then use back_project to obtain coordinates.
+Use wrist_high for close-range refinement of the same candidate. Pixel camera
+and resolution must match back_project; do not localize from agentview_policy.
+Never read BDDL, hidden object poses, memory, guides, or historical recipes.
+Derive all object and destination positions from current observations.
+
+Use pi0_pick for grasping and motion/gripper tools for transport and placement.
+gripper=1 closes/holds; gripper=-1 opens. Explicitly keep gripper=1 while
+carrying, including in move_pose. Verify grasp using images and gripper state.
+Check initial robot height to select the scene frame; do not borrow heights
+from another scene. Keep move_to target x/y within [-0.30, 0.30] meters.
+Inspect returned images and state after each action; if motion fails to reach
+its target, check the cause before proceeding.
+
+No reset, episode restart, teleport, or pi0_end_to_end. Recovery is allowed
+within this episode. Stop manipulation immediately when terminated=true;
+report failure honestly if unable to continue. Environment success, not a
+self-reported grasp or placement, determines the task result.
+
+At the end, write a concise audit to {{output_dir}}/{{recipe_tag}}.json with
+suite, task_id, seed, task_language, regime='strict_perception', terminated,
+final_step, final_state and strategy_notes. Then call finish with the result.
+Do not search for additional instructions or experience files."""
+
 ROLE_AND_EVALUATION = """You are an LLM-in-the-loop hybrid agent for the LIBERO PRO benchmark, running
 in PERCEPTION-ISOLATED mode: you are NOT given object world coordinates. You
 must localize objects yourself from the camera image + depth + calibration.
@@ -36,13 +64,13 @@ must localize objects yourself from the camera image + depth + calibration.
 PROVEN_LEVERS = """These are battle-tested on seed 0 of THIS suite. You are now running a DIFFERENT
 seed — object/fixture positions differ, so RE-LOCALIZE everything per scene
 (never hard-code an xyz). But the TECHNIQUES and the per-task target zones
-transfer directly. For your task, FIRST read the solved seed-0 reference (if
-present): `{{memory_dir}}/task_only/{{reference_tag}}.json` (+
+transfer directly. After inspecting the initial `task_language`, read the solved
+seed-0 reference (if present): `{{memory_dir}}/task_only/{{reference_tag}}.json` (+
 `{{memory_dir}}/task_only/{{reference_tag}}_recipe.jsonl`)
-— it has the winning strategy_notes and command sequence for the SAME task at
-seed 0. Reuse its approach; re-derive every coordinate from THIS scene.
+— it has the winning strategy_notes and command sequence from seed 0.
+Reuse its approach; re-derive every coordinate from THIS scene.
 The recipe is ONLY the command sequence. You must ALSO read the matching task
-memory (WORKFLOW step 1) — it carries the WHY, the parameter ranges, and the
+memory — it carries the WHY, the parameter ranges, and the
 failure modes you need to adapt the recipe to this seed. A recipe read without
 its memory is half the picture; consult BOTH before planning.
 
@@ -379,8 +407,19 @@ directly comparable. Do NOT blindly average them — accept wrist coords only wh
 consistent with the agentview anchor, or for basket/cavity geometry.)"""
 
 WORKFLOW_STEPS = (
-    """READ MEMORY FIRST — a general skill library (operating wisdom, magic numbers,
-gotchas, and reusable manipulation patterns), indexed by:
+    """READ THE GUIDES once each:
+- `robots/libero/guides/strict_hybrid_guide.md`
+- `robots/libero/guides/pro_hybrid_guide.md`
+- `robots/libero/guides/env_calibration.md`
+""",
+    """INSPECT INITIAL STATE: call `view_env_state({"step": 0})`; inspect
+  `task_language`, object_names, eef pose, `agentview_high.png`,
+  `wrist_high.png` if useful, and call `view_camera_meta` if needed. Identify ALL target
+objects, destination surfaces, and relation landmarks named by task_language.
+""",
+    """READ MEMORY for the observed `task_language` and scene. The library contains
+operating wisdom, magic numbers, gotchas, and reusable manipulation patterns,
+indexed by:
   `{{memory_dir}}/MEMORY.md`
 Scan the index, then `read_text_file` the few leaf memories most relevant to
 your cell. They are not all named `feedback_*`, and the index lines do not spell
@@ -406,12 +445,6 @@ so you must consult the memory too, not skip straight to replaying the recipe. I
 your final `strategy_notes`, RECORD the exact memory file name(s) you read (or
 state "no matching task memory found") so memory consultation is auditable.
 """,
-    """READ THE GUIDES (the PERCEPTION-compatible guides — NOT hidden benchmark
-internals, which would tempt you to use GT coords) once each:
-- `robots/libero/guides/strict_hybrid_guide.md`
-- `robots/libero/guides/pro_hybrid_guide.md`
-- `robots/libero/guides/env_calibration.md`
-""",
     """READ SEED-0 STRATEGY REFERENCES IF PRESENT, then solve from scratch.
 Strategy references live under:
 - `{{memory_dir}}/task_only/` (solved seed-0 audit + recipe pairs:
@@ -420,11 +453,6 @@ Use these for strategy_notes, prompt ladders, primitive ordering, gotchas, and
 qualitative target zones. They were built on different scenes and sometimes
 with older/oracle assumptions; do NOT copy coordinates and do NOT replay stale
 command lists. Re-derive every coordinate from THIS scene.
-""",
-    """INSPECT INITIAL STATE: call `view_env_state({"step": 0})`; inspect
-  `task_language`, object_names, eef pose, `agentview_high.png`,
-  `wrist_high.png` if useful, and call `view_camera_meta` if needed. Identify ALL target
-objects, destination surfaces, and relation landmarks named by task_language.
 """,
     """RUN THE MANDATORY PRE-TASK PERCEPTION PASS (FIRST-STEP ALGORITHM above) —
 localize EVERYTHING first, THEN act. Before any pick/place build the

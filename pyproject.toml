@@ -57,6 +57,8 @@ Documentation = "https://rpent.readthedocs.io/en/latest/"
 "Bug Report" = "https://github.com/RLinf/RPent/issues"
 
 [project.optional-dependencies]
+context-rl = ["torch>=2.6"]
+context = ["pillow>=10", "sentence-transformers>=3", "zstandard>=0.23"]
 test = [
     "coverage",
     "pytest",

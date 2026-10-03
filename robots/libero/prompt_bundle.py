@@ -27,6 +27,9 @@ from rpent.prompt.utils import Numbered, PromptNode
 
 def system_prompt(variables: Mapping[str, object] | None = None) -> PromptNode:
     """Assemble the LIBERO system prompt for the selected run mode."""
+    if (variables or {}).get("prompt_profile") == "compact":
+        _validate_compact(variables or {})
+        return system_parts.COMPACT
     if (variables or {}).get("mode", "eval") == "explore":
         return explore_parts.system_prompt()
     if (variables or {}).get("memory_profile", "hf") == "local":
@@ -53,11 +56,25 @@ def system_prompt(variables: Mapping[str, object] | None = None) -> PromptNode:
 
 def user_prompt(variables: Mapping[str, object] | None = None) -> PromptNode:
     """Assemble the LIBERO user prompt tree."""
+    if (variables or {}).get("prompt_profile") == "compact":
+        _validate_compact(variables or {})
+        if (variables or {}).get("suite") == "libero_10":
+            return user_parts.COMPACT_LONG_TASK1
+        return user_parts.COMPACT_TASK1
     return {
         "CELL": user_parts.CELL,
         "MODE": user_parts.MODE,
         "BEGIN": user_parts.BEGIN,
     }
+
+
+def _validate_compact(variables: Mapping[str, object]) -> None:
+    if (
+        variables.get("suite") not in ("libero_object_swap", "libero_10")
+        or variables.get("task") != 1
+        or variables.get("mode", "eval") != "eval"
+    ):
+        raise ValueError("compact supports libero_object_swap or libero_10 task 1 evaluation only")
 
 
 __all__ = ["system_prompt", "user_prompt"]

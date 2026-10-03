@@ -202,6 +202,11 @@ def _run_dashboard_task(
             }
             prompt_vars = {**run_config.prompt_vars, "output_dir": output_dir}
             session_message = robot_spec.prompts.render("user", variables=prompt_vars)
+            from rpent.context.memory import append_memory
+
+            session_message = append_memory(
+                session_message, getattr(task_args, "experience_blocks", [])
+            )
             sessions = max(
                 1,
                 int(getattr(task_args, "explore_sessions", 1) or 1),

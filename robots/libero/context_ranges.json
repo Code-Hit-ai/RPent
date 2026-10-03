@@ -1,0 +1,14 @@
+{
+  "state.robot0_gripper_qpos.0": [
+    0.0,
+    0.04
+  ],
+  "state.robot0_gripper_qpos.1": [
+    -0.04,
+    0.0
+  ],
+  "command.gripper": [
+    -1.0,
+    1.0
+  ]
+}

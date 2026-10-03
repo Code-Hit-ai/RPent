@@ -567,6 +567,7 @@ def test_full_cli_exploration_finalizes_memory_without_starting_gpu_runtime(
 
     transcript = json.loads((tmp_path / "transcript_libero_s0.json").read_text())
     assert transcript["robot"] == "libero"
+    assert transcript["environment_success"] is True
     assert transcript["finish"] == {
         "_finish": True,
         "status": "success",
@@ -692,6 +693,10 @@ def test_full_cli_calls_robot_result_finalizer_without_robot_special_case(
     context = captured[0]
     assert context.robot_name == "testrobot"
     assert context.environment_success is False
+    transcript = json.loads(next(tmp_path.glob("transcript_*.json")).read_text())
+    assert transcript["environment_success"] is False
+    assert transcript["finish"]["status"] == "success"
+    assert transcript["agent_error"] is None
     assert context.agent_error is None
     assert context.planner == "codex"
     assert context.model == "gpt-5.5"
@@ -707,3 +712,12 @@ def test_full_cli_calls_robot_result_finalizer_without_robot_special_case(
     }
     assert robot_toolkit.closed is True
     assert daemon.stopped is True
+
+
+def test_experience_memory_option_is_preserved_for_robot_run(monkeypatch, tmp_path):
+    path = tmp_path / "memory.txt"
+    path.write_text("【Experience】\nUse current observations.\n")
+    _, args = _capture_validated_args(
+        monkeypatch, ["--robot", "libero", "--experience-memory", str(path)]
+    )
+    assert args.experience_memory == path
